@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+use std::println;
+
 use crate::mmu::Mmu;
 
 const Z_FLAG: u8 = 0b1000_0000; // Bit 7
@@ -191,5 +193,39 @@ impl Cpu {
                 4
             }
         }
+    }
+
+    // Print status for each register
+    pub fn debug_dump(&self) {
+        println!("--- CPU REGISTERS ---");
+        println!(
+            "A: 0x{:02X} | F: 0x{:02X} (Z:{} N:{} H:{} C:{})",
+            self.a,
+            self.f,
+            self.get_z() as u8,
+            self.get_n() as u8,
+            self.get_h() as u8,
+            self.get_c() as u8
+        );
+        println!(
+            "B: 0x{:02X} | C: 0x{:02X} -> BC: 0x{:04X}",
+            self.b,
+            self.c,
+            self.get_bc()
+        );
+        println!(
+            "D: 0x{:02X} | E: 0x{:02X} -> DE: 0x{:04X}",
+            self.d,
+            self.e,
+            self.get_de()
+        );
+        println!(
+            "H: 0x{:02X} | L: 0x{:02X} -> HL: 0x{:04X}",
+            self.h,
+            self.l,
+            self.get_hl()
+        );
+        println!("PC: 0x{:04X} | SP: 0x{:04X}", self.pc, self.sp);
+        println!("---------------------");
     }
 }
