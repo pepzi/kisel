@@ -1,6 +1,11 @@
 #![allow(dead_code)]
 use crate::mmu::Mmu;
 
+const Z_FLAG: u8 = 0b1000_0000; // Bit 7
+const N_FLAG: u8 = 0b0100_0000; // Bit 6
+const H_FLAG: u8 = 0b0010_0000; // Bit 5
+const C_FLAG: u8 = 0b0001_0000; // Bit 4
+
 pub struct Cpu {
     // 8-bit registers
     pub a: u8,
@@ -71,6 +76,70 @@ impl Cpu {
         self.a = (value >> 8) as u8;
         // NOTICE: The lowest four bits of the F register are ALWAYS zero!
         self.f = (value & 0xF0) as u8;
+    }
+
+    // Getters for easilly checking if a flag is set (returns true/false)
+    pub fn get_z(&self) -> bool {
+        (self.f & Z_FLAG) != 0
+    }
+    pub fn get_n(&self) -> bool {
+        (self.f & N_FLAG) != 0
+    }
+    pub fn get_h(&self) -> bool {
+        (self.f & H_FLAG) != 0
+    }
+    pub fn get_c(&self) -> bool {
+        (self.f & C_FLAG) != 0
+    }
+
+    // Universal method to set or clear flag using bools
+    pub fn set_flags(&mut self, z: bool, n: bool, h: bool, c: bool) {
+        self.f = 0; // Zero out everything
+        if z {
+            self.f |= Z_FLAG
+        }
+        if n {
+            self.f |= N_FLAG
+        }
+        if h {
+            self.f |= H_FLAG
+        }
+        if c {
+            self.f |= C_FLAG
+        }
+    }
+
+    // Useful helper functions to change a single flag, leaving them all untouched
+    pub fn set_z(&mut self, value: bool) {
+        if value {
+            self.f |= Z_FLAG;
+        } else {
+            self.f &= !Z_FLAG;
+        }
+    }
+
+    pub fn set_n(&mut self, value: bool) {
+        if value {
+            self.f |= N_FLAG;
+        } else {
+            self.f &= !N_FLAG;
+        }
+    }
+
+    pub fn set_h(&mut self, value: bool) {
+        if value {
+            self.f |= H_FLAG;
+        } else {
+            self.f &= !H_FLAG;
+        }
+    }
+
+    pub fn set_c(&mut self, value: bool) {
+        if value {
+            self.f |= C_FLAG;
+        } else {
+            self.f &= !C_FLAG;
+        }
     }
 
     // Run one instruction and return how many clock cycles it took
