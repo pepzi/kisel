@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 pub struct Mmu {
     memory: [u8; 65536], // 64KB ram
 }
