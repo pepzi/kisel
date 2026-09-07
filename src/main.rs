@@ -1,7 +1,7 @@
 mod cpu;
 mod mmu;
 use minifb::{Key, Window, WindowOptions};
-
+use std::env;
 use std::println;
 
 use cpu::Cpu;
@@ -11,11 +11,51 @@ const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
 
 fn main() {
-    println!("Starting the Game Boy emulator...");
+    // Get arguments from command
+    let args: Vec<String> = env::args().collect();
 
+    // Check if user send an argument, otherwise set "noise" as standard
+    let mode = if args.len() > 1 {
+        args[1].as_str()
+    } else {
+        "noise"
+    };
+
+    // 2. Run selected mode
+    match mode {
+        "cpu" => {
+            println!("Starting Game Boy Emulator in CPU-test mode (dummy ROM)...");
+            run_cpu_test();
+        }
+        "noise" => {
+            println!("Running in windowed mode with graphical noise...");
+            run_graphic_noise();
+        }
+        _ => {
+            println!("Unknown argument '{}'. Use 'cpu' or 'noise'.", mode);
+        }
+    }
+}
+
+fn run_cpu_test() {
     let mut mmu = Mmu::new();
     let mut cpu = Cpu::new();
 
+    // Create a minimal "dummy" ROM in code to test, using just two NOP instructions
+    let dummy_rom = vec![0x00, 0x00];
+    mmu.load_rom(&dummy_rom);
+
+    // Simple emulation loop
+    for _ in 0..2 {
+        let cycles = cpu.step(&mut mmu);
+        println!(
+            "Running instruction took {} cycles. PC is now at: 0x{:04X}",
+            cycles, cpu.pc
+        );
+    }
+}
+
+fn run_graphic_noise() {
     // Create empty pixel-buffer (minifb wants 32-bit ARGB pixels)
     let mut buffer: Vec<u32> = vec![0; SCREEN_WIDTH * SCREEN_HEIGHT];
 
@@ -49,27 +89,14 @@ fn main() {
             .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
             .unwrap();
     }
+}
 
-    // Simple and fast helper method to create a random value between 0 and 255
-    // without the rand-crate
-    fn rand_brightness() -> u32 {
-        static mut SEED: u32 = 123456789;
-        unsafe {
-            SEED = SEED.overflowing_mul(1103515245).0.overflowing_add(12345).0;
-            (SEED / 65536) % 256
-        }
-    }
-
-    // Create a minimal "dummy" ROM in code to test, using just two NOP instructions
-    let dummy_rom = vec![0x00, 0x00];
-    mmu.load_rom(&dummy_rom);
-
-    // Simple emulation loop
-    for _ in 0..2 {
-        let cycles = cpu.step(&mut mmu);
-        println!(
-            "Running instruction took {} cycles. PC is now at: 0x{:04X}",
-            cycles, cpu.pc
-        );
+// Simple and fast helper method to create a random value between 0 and 255
+// without the rand-crate
+fn rand_brightness() -> u32 {
+    static mut SEED: u32 = 123456789;
+    unsafe {
+        SEED = SEED.overflowing_mul(1103515245).0.overflowing_add(12345).0;
+        (SEED / 65536) % 256
     }
 }
