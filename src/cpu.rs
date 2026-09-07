@@ -152,6 +152,36 @@ impl Cpu {
                 // NOP
                 4
             }
+
+            0x06 => {
+                // LB B, n
+                let n = mmu.read_byte(self.pc);
+                self.pc += 1;
+                self.b = n;
+                8 // uses 8 cycles (4 for opcode fetch, 4 to read n)
+            }
+
+            0x01 => {
+                // LD BC, d16
+                // Game Boy is little endian, so the least significant byte comes first
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+
+                let d16 = (high << 8) | low;
+                self.set_bc(d16);
+                12 // uses 12 cycles
+            }
+
+            0x0A => {
+                // LD A, (BC)
+                let addr = self.get_bc(); // Fetch next address from BC pair
+                let value = mmu.read_byte(addr); // Read from memory at that address
+                self.a = value; // store in A
+                8 // Uses 8 clock cycles
+            }
+
             _ => {
                 println!(
                     "Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
