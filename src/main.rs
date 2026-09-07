@@ -1,16 +1,64 @@
 mod cpu;
 mod mmu;
+use minifb::{Key, Window, WindowOptions};
 
 use std::println;
 
 use cpu::Cpu;
 use mmu::Mmu;
 
+const SCREEN_WIDTH: usize = 160;
+const SCREEN_HEIGHT: usize = 144;
+
 fn main() {
     println!("Starting the Game Boy emulator...");
 
     let mut mmu = Mmu::new();
     let mut cpu = Cpu::new();
+
+    // Create empty pixel-buffer (minifb wants 32-bit ARGB pixels)
+    let mut buffer: Vec<u32> = vec![0; SCREEN_WIDTH * SCREEN_HEIGHT];
+
+    let mut window = Window::new(
+        "Rust Game Boy Emulator",
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        WindowOptions {
+            scale: minifb::Scale::X4,
+            ..WindowOptions::default()
+        },
+    )
+    .unwrap_or_else(|e| panic!("{}", e));
+
+    // Limit frame rate to around 60 Hz
+    window.set_target_fps(60);
+
+    // Main loop: Running as long as window is open and ESC isn't pressed
+    while window.is_open() && !window.is_key_down(Key::Escape) {
+        // 1. This is where the emulation loop will run instructions in the future:
+        // cpu.step(&mut mmu);
+
+        // 2. Create white noise to see the window "alive"
+        for pixel in buffer.iter_mut() {
+            let rand_val = rand_brightness(); // Random grey-scale
+            *pixel = (255 << 24) | (rand_val << 16) | (rand_val << 8) | rand_val;
+        }
+
+        // 3. Update windows with pixel buffer
+        window
+            .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
+            .unwrap();
+    }
+
+    // Simple and fast helper method to create a random value between 0 and 255
+    // without the rand-crate
+    fn rand_brightness() -> u32 {
+        static mut SEED: u32 = 123456789;
+        unsafe {
+            SEED = SEED.overflowing_mul(1103515245).0.overflowing_add(12345).0;
+            (SEED / 65536) % 256
+        }
+    }
 
     // Create a minimal "dummy" ROM in code to test, using just two NOP instructions
     let dummy_rom = vec![0x00, 0x00];
