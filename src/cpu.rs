@@ -327,6 +327,40 @@ impl Cpu {
                 8 // 8 cycles
             }
 
+            0x36 => {
+                // LD (HL), n ( Write immediate 8-bit value to memory address HL)
+                let n = mmu.read_byte(self.pc);
+                self.pc += 1;
+
+                let addr = self.get_hl();
+                mmu.write_byte(addr, n);
+                12 // 12 cycles
+            }
+
+            0xEA => {
+                // LD (nn), A (Write register A to absolute 16-bit address nn)
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+
+                let nn = (high << 8) | low;
+                mmu.write_byte(nn, self.a);
+                16 // 16 cycles
+            }
+
+            0x31 => {
+                //LD SP, d16 (load 16-bit immediate value into stack pointer)
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+
+                let d16 = (high << 8) | low;
+                self.sp = d16;
+                12 // 12 cycles
+            }
+
             _ => {
                 println!(
                     "\n[KRASCH] Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
