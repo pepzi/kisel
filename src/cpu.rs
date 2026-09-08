@@ -361,6 +361,39 @@ impl Cpu {
                 12 // 12 cycles
             }
 
+            0x2A => {
+                // LD A, (HL+) (Read memory at HL into register A, then increment HL)
+                let addr = self.get_hl();
+                let value = mmu.read_byte(addr);
+                self.a = value;
+
+                // Increase HL with 1 (with wrapping)
+                let new_hl = addr.wrapping_add(1);
+                self.set_hl(new_hl);
+
+                8 // 8 cycles
+            }
+
+            0xE2 => {
+                // LD ($FF00+C), A (Write register A to memory address 0xFF00 + register C)
+                let addr = 0xFF00 | (self.c as u16);
+                mmu.write_byte(addr, self.a);
+                8 // 8 cycles
+            }
+
+            0x0C => {
+                // INC c (Increment register C by 1)
+                let half_carry = (self.c & 0xFF) == 0x0F;
+
+                self.c = self.c.wrapping_add(1);
+
+                self.set_z(self.c == 0);
+                self.set_n(false);
+                self.set_h(half_carry);
+
+                4 // 4 cycles
+            }
+
             _ => {
                 println!(
                     "\n[KRASCH] Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
