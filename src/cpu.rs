@@ -204,6 +204,22 @@ impl Cpu {
                 4 // 4 cycles
             }
 
+            0xA9 => {
+                // XOR C (Exclusive OR register C with register A)
+                self.a ^= self.c; // Execute XOR and store in A
+
+                self.set_flags(self.a == 0, false, false, false);
+                4 // 4 cycles
+            }
+
+            0xA1 => {
+                // AND C ( Bitwise AND register C with register A)
+                self.a &= self.c;
+
+                self.set_flags(self.a == 0, false, true, false);
+                4 // 4 cycles
+            }
+
             0x21 => {
                 // LD HL, d16 (Load 16-bit immediate value into HL pair)
                 let low = mmu.read_byte(self.pc) as u16;
@@ -435,6 +451,21 @@ impl Cpu {
                 4 // uses 4 cycles
             }
 
+            0x79 => {
+                // LD A, C (Copy register C into register A)
+                self.a = self.c;
+                4 // uses 4 cycles
+            }
+
+            0xB0 => {
+                // OR B ( Bitwise register B with register A)
+                self.a |= self.b;
+
+                // Update flags
+                self.set_flags(self.a == 0, false, false, false);
+                4 // 4 cycles
+            }
+
             0xB1 => {
                 // OR C (Bitwise OR register C with register A)
                 self.a |= self.c; // execute OR operation and store result in A
@@ -467,6 +498,76 @@ impl Cpu {
                 4 // Uses 4 cycles
             }
 
+            0x2F => {
+                // CPL (Complement A - Invert all bits in register A)
+                self.a = !self.a;
+
+                // Update flags: N and H are always true. Z and C unaltered
+                self.set_n(true);
+                self.set_h(true);
+
+                4 // 4 cycles
+            }
+
+            0xE6 => {
+                // AND n (Bitwise AND register A with immediate 8-bit balue n)
+                let n = mmu.read_byte(self.pc);
+                self.pc += 1;
+
+                self.a &= n; // Execute AND and save in A
+
+                // Update flags: Z set by result, N=false, H=true (always!), C=false
+                self.set_flags(self.a == 0, false, true, false);
+                8 // 8 cycles
+            }
+
+            0xCB => {
+                // CB Prefix - Read next byte and run from secondary table
+                let cb_opcode = mmu.read_byte(self.pc);
+                self.pc += 1;
+
+                // Let's call our new method (returning it's cycles +4 for the 0xCB search)
+                self.step_cb(cb_opcode, mmu) + 4
+            }
+
+            0x47 => {
+                // LD B, A (Copy register A to register B)
+                self.b = self.a;
+                4 // 4 cycles
+            }
+
+            0x4F => {
+                // LD C, A (Copy register A to register C)
+                self.c = self.a;
+                4 // 4 cycles
+            }
+
+            0xEF => {
+                // RST 28H (Call subroutine at fixed vector address 0x0028)
+                let return_addr = self.pc;
+
+                self.sp = self.sp.wrapping_sub(1);
+                mmu.write_byte(self.sp, (return_addr >> 8) as u8);
+
+                self.sp = self.sp.wrapping_sub(1);
+                mmu.write_byte(self.sp, (return_addr & 0xFF) as u8);
+
+                self.pc = 0x0028;
+                16 // 16 cycles
+            }
+
+            0x87 => {
+                // ADD A, A (Add register A to itself)
+                // Calculate Half-Carry before modifying A
+                let half_carry = ((self.a & 0x0F) + (self.a & 0x0F)) > 0x0F;
+
+                let (result, carry) = self.a.overflowing_add(self.a);
+                self.a = result;
+
+                self.set_flags(self.a == 0, false, half_carry, carry);
+                4
+            }
+
             _ => {
                 println!(
                     "\n[KRASCH] Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
@@ -475,6 +576,29 @@ impl Cpu {
                 );
                 self.debug_dump(); // Dumpa registertillståndet direkt vid kraschen
                 0 // Returnera 0 för att tala om för main-loopen att stanna!
+            }
+        }
+    }
+
+    // Secondary instruction table for bit-manipulation (0xCB-prefix)
+    fn step_cb(&mut self, opcode: u8, _mmu: &mut Mmu) -> u32 {
+        match opcode {
+            0x37 => {
+                // SWAP A (Swap upper and lower nibbles of register A)
+                self.a = self.a.rotate_left(4);
+
+                // Uppdatera flaggor: Z beror på om A är 0, resten blir alltid false!
+                self.set_flags(self.a == 0, false, false, false);
+                8 // En CB-instruktion tar oftast 8 cykler internt
+            }
+            _ => {
+                println!(
+                    "\n[KRASCH] Unknown or unimplemented CB opcode: 0x{:02X} at PC: 0x{:04X}",
+                    opcode,
+                    self.pc - 1
+                );
+                self.debug_dump();
+                0 // Returnera 0 för att stoppa emulatorn
             }
         }
     }
