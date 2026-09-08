@@ -429,6 +429,44 @@ impl Cpu {
                 8 // Uses 8 cycles
             }
 
+            0x78 => {
+                // LD A, B (Copy register B into register A)
+                self.a = self.b;
+                4 // uses 4 cycles
+            }
+
+            0xB1 => {
+                // OR C (Bitwise OR register C with register A)
+                self.a |= self.c; // execute OR operation and store result in A
+
+                // Uppdate flags: Z is set by result, everything else reset
+                self.set_flags(self.a == 0, false, false, false);
+                4 // 4 cycles
+            }
+
+            0xC9 => {
+                // RET (Return from Subroutine)
+                // Pop the return address from stack (little endian)
+                let low = mmu.read_byte(self.sp) as u16;
+                self.sp = self.sp.wrapping_add(1);
+
+                let high = mmu.read_byte(self.sp) as u16;
+                self.sp = self.sp.wrapping_add(1);
+
+                let return_addr = (high << 8) | low;
+
+                // Set PC to address to return to
+                self.pc = return_addr;
+                16 // uses 16 cycles
+            }
+
+            0xFB => {
+                // EI (Enable Interrupts)
+                // TODO: Set IME = true (usually with a delay of 1 instruction on real
+                // heardware)
+                4 // Uses 4 cycles
+            }
+
             _ => {
                 println!(
                     "\n[KRASCH] Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
