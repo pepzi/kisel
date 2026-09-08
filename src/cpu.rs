@@ -383,7 +383,7 @@ impl Cpu {
 
             0x0C => {
                 // INC c (Increment register C by 1)
-                let half_carry = (self.c & 0xFF) == 0x0F;
+                let half_carry = (self.c & 0x0F) == 0x0F;
 
                 self.c = self.c.wrapping_add(1);
 
