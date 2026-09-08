@@ -409,7 +409,7 @@ impl Cpu {
                 8 // 8 cycles
             }
 
-            05 => {
+            0x05 => {
                 // DEC B (Decrement register B by 1)
                 // Caclculate half-carry before decrement
                 let half_carry = (self.b & 0x0F) == 0;
