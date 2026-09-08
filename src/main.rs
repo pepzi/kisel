@@ -50,8 +50,8 @@ fn run_cpu_test() {
         let cycles = cpu.step(&mut mmu);
 
         if cycles == 0 {
-            println!("\nStopped at instruction number {}.", instruction_count);
-            break;
+            println!("\n[STOPP] Emulatorn stängdes av på grund av en oimplementerad instruktion.");
+            std::process::exit(1); // <--- ÄNDRA HÄR: Döda processen stenhårt direkt!
         }
 
         instruction_count = instruction_count.wrapping_add(1);
