@@ -27,16 +27,16 @@ pub struct Cpu {
 impl Cpu {
     pub fn new() -> Self {
         Self {
-            a: 0,
-            f: 0,
-            b: 0,
-            c: 0,
-            d: 0,
-            e: 0,
-            h: 0,
-            l: 0,
-            pc: 0x0000,
-            sp: 0x0000,
+            a: 0x01,
+            f: 0xB0,
+            b: 0x00,
+            c: 0x13,
+            d: 0x00,
+            e: 0xD8,
+            h: 0x01,
+            l: 0x4D,
+            pc: 0x0100, // Startar på 0x0100 för att hoppa över boot-rom
+            sp: 0xFFFE, // Sätter Stack Pointer till toppen av High RAM
         }
     }
 
@@ -184,13 +184,66 @@ impl Cpu {
                 8 // Uses 8 clock cycles
             }
 
+            0xC3 => {
+                // JP nn (Absolute jump to 16-bit immediate address)
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+
+                let nn = (high << 8) | low;
+                self.pc = nn; // Change PC to new address!
+                16 // uses 16 cloc cycles
+            }
+
+            0xAF => {
+                // XOR a (Exclusive OR register A with itself. Quick way to clear A)
+                self.a ^= self.a; // Blir alltid 0
+
+                self.set_flags(true, false, false, false);
+                4 // 4 cycles
+            }
+
+            0x21 => {
+                // LD HL, d16 (Load 16-bit immediate value into HL pair)
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+
+                let d16 = (high << 8) | low;
+                self.set_hl(d16);
+                12 // 12 cycles
+            }
+
+            0x0E => {
+                // LD C, n (load 8-bit immediate value into register C)
+                let n = mmu.read_byte(self.pc);
+                self.pc += 1;
+                self.c = n;
+                8 // 8 cycles
+            }
+
+            0x32 => {
+                // LD (HL-), A (Write register A to memory address HL, then decremnt HL)
+                let addr = self.get_hl();
+                mmu.write_byte(addr, self.a);
+
+                // Decrease HL by 1
+                let new_hl = addr.wrapping_sub(1);
+                self.set_hl(new_hl);
+
+                8 // 8 cycles
+            }
+
             _ => {
                 println!(
-                    "Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
+                    "\n[KRASCH] Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
                     opcode,
                     self.pc - 1
                 );
-                4
+                self.debug_dump(); // Dumpa registertillståndet direkt vid kraschen
+                0 // Returnera 0 för att tala om för main-loopen att stanna!
             }
         }
     }

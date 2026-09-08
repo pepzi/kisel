@@ -41,23 +41,23 @@ fn run_cpu_test() {
     let mut mmu = Mmu::new();
     let mut cpu = Cpu::new();
 
-    // Create a minimal "dummy" ROM in code to test, using just two NOP instructions
-    let dummy_rom = vec![
-        0x06, 0x42, // 0x0000: LD B, 0x42
-        0x01, 0x05, 0x00, // 0x0002: LD BC, 0x0005 (Points to address 0x0005 in memory)
-        0x0a, // 0x0005: LD A, (BC) -> Will read its own address and fetch 0x0A!
-    ];
-    mmu.load_rom(&dummy_rom);
+    mmu.load_rom("tetris.gb");
 
-    println!("Starttillstånd:");
-    cpu.debug_dump();
+    println!("Staring executing from 0x0100...");
 
-    // Let's run 3 instructions (one for each opcode in our dummy_rom)
-    for i in 0..=3 {
-        println!("\n--- Steg {} ---", i);
+    let mut instruction_count = 0;
+    loop {
+        let current_pc = cpu.pc;
+        let opcode = mmu.read_byte(current_pc);
+
         let cycles = cpu.step(&mut mmu);
-        println!("Running instruction took {} cycles.", cycles);
-        cpu.debug_dump();
+
+        if cycles == 0 {
+            println!("\nStopped at instruction number {}.", instruction_count);
+            break;
+        }
+
+        instruction_count += 1;
     }
 }
 

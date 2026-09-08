@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+use std::{fs, println};
+
 pub struct Mmu {
     memory: [u8; 65536], // 64KB ram
 }
@@ -18,9 +20,17 @@ impl Mmu {
         self.memory[addr as usize] = value;
     }
 
-    // Helper method to load a ROM into memory (starting att address 0x0000)
-    pub fn load_rom(&mut self, rom: &[u8]) {
-        let size = rom.len().min(self.memory.len());
-        self.memory[..size].copy_from_slice(&rom[..size]);
+    pub fn load_rom(&mut self, path: &str) {
+        match fs::read(path) {
+            Ok(bytes) => {
+                // Tetris is 32 KB in size (0x0000 - 0x7FFFF), which fits in memory nicely
+                let size = bytes.len().min(self.memory.len());
+                self.memory[..size].copy_from_slice(&bytes[..size]);
+                println!("Successfully loaded ROM: {} ({} bytes)", path, bytes.len());
+            }
+            Err(e) => {
+                panic!("Unable to load ROM '{}': {}", path, e);
+            }
+        }
     }
 }
