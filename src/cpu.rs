@@ -394,6 +394,41 @@ impl Cpu {
                 4 // 4 cycles
             }
 
+            0x0CD => {
+                // CALL nn (Call subroutine at 16-bit absolute address nn)
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+
+                let nn = (high << 8) | low;
+
+                // Store current return address (PC) to stack (little endian)
+                let return_addr = self.pc;
+
+                // Decrease SP and write high byte
+                self.sp = self.sp.wrapping_sub(1);
+                mmu.write_byte(self.sp, (return_addr >> 8) as u8);
+
+                // Decrease SP and write low byte
+                self.sp = self.sp.wrapping_sub(1);
+                mmu.write_byte(self.sp, (return_addr & 0xFF) as u8);
+
+                // JUmp to new function
+                self.pc = nn;
+
+                24 // uses 24 cycles
+            }
+
+            0x0B => {
+                // DEC BC (Decrement 16-bit register pair BC)
+                let current_bc = self.get_bc();
+                let new_bc = current_bc.wrapping_sub(1);
+                self.set_bc(new_bc);
+
+                8 // Uses 8 cycles
+            }
+
             _ => {
                 println!(
                     "\n[KRASCH] Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
