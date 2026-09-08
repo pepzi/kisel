@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 use std::println;
 
+use minifb::Key::M;
+
 use crate::mmu::Mmu;
 
 const Z_FLAG: u8 = 0b1000_0000; // Bit 7
@@ -233,6 +235,56 @@ impl Cpu {
                 let new_hl = addr.wrapping_sub(1);
                 self.set_hl(new_hl);
 
+                8 // 8 cycles
+            }
+
+            05 => {
+                // DEC B (Decrement register B by 1)
+                // Caclculate half-carry before decrement
+                let half_carry = (self.b & 0x0F) == 0;
+
+                self.b = self.b.wrapping_sub(1);
+
+                self.set_z(self.b == 0);
+                self.set_n(true);
+                self.set_h(half_carry);
+
+                4 // 4 clock cycles
+            }
+
+            0x20 => {
+                // JR NZ r8 (Jump Relative if Not Zero)
+                // Read jump-offset as a signed i8
+                let offset = mmu.read_byte(self.pc) as i8;
+                self.pc += 1;
+
+                if !self.get_z() {
+                    // If Z-flag is NOT set, do the jump safe and sound
+                    let new_pc = (self.pc as i32).wrapping_add(offset as i32) as u16;
+                    self.pc = new_pc;
+                    12 // 12 cycles used
+                } else {
+                    8 // 8 cycles used when not jumping
+                }
+            }
+
+            0x0D => {
+                // DEC c ( Decrement register C by 1)
+                let half_carry = (self.c & 0x0F) == 0;
+                self.c = self.c.wrapping_sub(1);
+
+                self.set_z(self.c == 0);
+                self.set_n(true);
+                self.set_h(half_carry);
+
+                4 // 4 clock cycles
+            }
+
+            0x3E => {
+                // LD A, n (load 8-bit immediate value into register A)
+                let n = mmu.read_byte(self.pc);
+                self.pc += 1;
+                self.a = n;
                 8 // 8 cycles
             }
 
