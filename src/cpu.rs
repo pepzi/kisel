@@ -1,8 +1,6 @@
 #![allow(dead_code)]
 use std::println;
 
-use minifb::Key::M;
-
 use crate::mmu::Mmu;
 
 const Z_FLAG: u8 = 0b1000_0000; // Bit 7
@@ -285,6 +283,47 @@ impl Cpu {
                 let n = mmu.read_byte(self.pc);
                 self.pc += 1;
                 self.a = n;
+                8 // 8 cycles
+            }
+
+            0xF3 => {
+                // DI (Disable Interrupts)
+                // TODO: Set IME = false when we implement interrupts in the future
+                4 // uses 4 clock cycles
+            }
+
+            0xE0 => {
+                // LDH (n), A (Write register A to memory address 0xFF00 +n)
+                let n = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+
+                let addr = 0xFF00 | n; // Or 0xFF00 + n
+                mmu.write_byte(addr, self.a);
+                12 // 12 cycles
+            }
+
+            0xF0 => {
+                // LDH A, (n) (Read from memory address 0xFF00 +n into register A)
+                let n = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+
+                let addr = 0xFF00 | n;
+                let value = mmu.read_byte(addr);
+                self.a = value;
+                12 // 12 cycles
+            }
+
+            0xFE => {
+                // CP n (Compare register A with immediate 8-bit value)
+                let n = mmu.read_byte(self.pc);
+                self.pc += 1;
+
+                // Calculate flags based on (A - n)
+                let zero = self.a == n;
+                let half_carry = (self.a & 0x0F) < (n & 0x0F);
+                let carry = self.a < n;
+
+                self.set_flags(zero, true, half_carry, carry);
                 8 // 8 cycles
             }
 

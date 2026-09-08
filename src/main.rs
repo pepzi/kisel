@@ -45,11 +45,8 @@ fn run_cpu_test() {
 
     println!("Staring executing from 0x0100...");
 
-    let mut instruction_count = 0;
+    let mut instruction_count: u32 = 0;
     loop {
-        let current_pc = cpu.pc;
-        let opcode = mmu.read_byte(current_pc);
-
         let cycles = cpu.step(&mut mmu);
 
         if cycles == 0 {
@@ -57,7 +54,13 @@ fn run_cpu_test() {
             break;
         }
 
-        instruction_count += 1;
+        instruction_count = instruction_count.wrapping_add(1);
+
+        if instruction_count.is_multiple_of(100) {
+            let current_ly = mmu.read_byte(0xFF44);
+            // SKärmen har 154 scanlines totalt (0-153)
+            mmu.write_byte(0xFF44, (current_ly + 1) % 154);
+        }
     }
 }
 
