@@ -163,6 +163,80 @@ impl Cpu {
                 8 // uses 8 cycles (4 for opcode fetch, 4 to read n)
             }
 
+            0x16 => {
+                // LD D, n (Load 8-bit immediate value into register D)
+                let n = mmu.read_byte(self.pc);
+                self.pc += 1;
+                self.d = n;
+                8 // Tar 8 klockcykler
+            }
+
+            0x19 => {
+                // ADD HL, DE (Add 16-bit register pair DE to HL pair)
+                let hl = self.get_hl();
+                let de = self.get_de();
+
+                // Räkna ut 16-bitars Half-Carry (overflow vid bit 11)
+                let half_carry = ((hl & 0x0FFF) + (de & 0x0FFF)) > 0x0FFF;
+
+                // Utför additionen säkert och fånga Carry (overflow vid bit 15)
+                let (result, carry) = hl.overflowing_add(de);
+                self.set_hl(result);
+
+                // Uppdatera flaggorna: Z lämnas orörd, N=false, H och C styrs av beräkningen!
+                self.set_n(false);
+                self.set_h(half_carry);
+                self.set_c(carry);
+
+                8 // Tar 8 klockcykler på den interna 16-bitarsbussen
+            }
+
+            0x5E => {
+                // LD E, (HL) (Load value from memory address HL into register E)
+                let addr = self.get_hl();
+                let value = mmu.read_byte(addr);
+                self.e = value;
+                8 // Tar 8 klockcykler (4 för opcode, 4 för minnesläsningen)
+            }
+
+            0x56 => {
+                // LD D, (HL) (Load value from memory address HL into register D)
+                let addr = self.get_hl();
+                let value = mmu.read_byte(addr);
+                self.d = value;
+                8 // Tar 8 klockcykler
+            }
+
+            0xD5 => {
+                // PUSH DE (Push 16-bit register pair DE onto the stack)
+                let de = self.get_de();
+
+                // Minska SP och skriv hög byte
+                self.sp = self.sp.wrapping_sub(1);
+                mmu.write_byte(self.sp, (de >> 8) as u8);
+
+                // Minska SP och skriv låg byte
+                self.sp = self.sp.wrapping_sub(1);
+                mmu.write_byte(self.sp, (de & 0xFF) as u8);
+
+                16 // Tar 16 klockcykler eftersom den gör två minnesskrivningar
+            }
+
+            0xE9 => {
+                // JP (HL) (Jump to the 16-bit address contained in HL)
+                self.pc = self.get_hl();
+                4 // Tar 4 klockcykler
+            }
+
+            0x23 => {
+                // INC HL (Increment 16-bit register pair HL by 1)
+                let current_hl = self.get_hl();
+                let new_hl = current_hl.wrapping_add(1);
+                self.set_hl(new_hl);
+
+                8 // Tar 8 klockcykler på 16-bitarsbussen
+            }
+
             0x01 => {
                 // LD BC, d16
                 // Game Boy is little endian, so the least significant byte comes first
@@ -175,7 +249,23 @@ impl Cpu {
                 self.set_bc(d16);
                 12 // uses 12 cycles
             }
+            0x11 => {
+                // LD DE, d16 (Load 16-bit immediate value into DE pair)
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc += 1;
 
+                let d16 = (high << 8) | low;
+                self.set_de(d16); // Använd din fina 16-bitarsmetod!
+                12 // Tar 12 klockcykler
+            }
+            0x12 => {
+                // LD (DE), A (Write register A to memory address DE)
+                let addr = self.get_de();
+                mmu.write_byte(addr, self.a);
+                8 // Tar 8 klockcykler
+            }
             0x0A => {
                 // LD A, (BC)
                 let addr = self.get_bc(); // Fetch next address from BC pair
@@ -542,6 +632,12 @@ impl Cpu {
                 4 // 4 cycles
             }
 
+            0x5F => {
+                // LD E, A (Copy register A into register E)
+                self.e = self.a;
+                4 // 4 cycles
+            }
+
             0xEF => {
                 // RST 28H (Call subroutine at fixed vector address 0x0028)
                 let return_addr = self.pc;
@@ -568,6 +664,20 @@ impl Cpu {
                 4
             }
 
+            0xE1 => {
+                // POP HL (Pop 16-bit value from stack into HL pair)
+                let low = mmu.read_byte(self.sp) as u16;
+                self.sp = self.sp.wrapping_add(1);
+
+                let high = mmu.read_byte(self.sp) as u16;
+                self.sp = self.sp.wrapping_add(1);
+
+                let value = (high << 8) | low;
+                self.set_hl(value);
+
+                12 // 12 cycles
+            }
+
             _ => {
                 println!(
                     "\n[KRASCH] Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
@@ -590,6 +700,11 @@ impl Cpu {
                 // Uppdatera flaggor: Z beror på om A är 0, resten blir alltid false!
                 self.set_flags(self.a == 0, false, false, false);
                 8 // En CB-instruktion tar oftast 8 cykler internt
+            }
+            0x87 => {
+                // RES 0, A (Reset bit 0 in register A)
+                self.a &= !1; // Nollställ bit 0 säkert
+                8 // Tar 8 klockcykler
             }
             _ => {
                 println!(
