@@ -24,6 +24,7 @@ pub struct Cpu {
     pub sp: u16, // Stack Pointer
 
     pub ime: bool, // Interrupt Master Enable
+    pub last_rom_pc: u16,
 }
 
 impl Cpu {
@@ -40,6 +41,7 @@ impl Cpu {
             pc: 0x0100,
             sp: 0xFFFE,
             ime: false,
+            last_rom_pc: 0x0100,
         }
     }
 
@@ -166,9 +168,19 @@ impl Cpu {
                 } else {
                     (0x10, 0x0060)
                 };
+
                 mmu.write_byte(0xFF0F, iflag & !bit);
 
                 let ret = self.pc;
+
+                /*                 if addr == 0x0040 {
+                                   println!(
+                                       "IRQ VBlank PC_in={:04X} FF85={:02X}",
+                                       ret,
+                                       mmu.read_byte(0xFF85)
+                                   );
+                               }
+                */
                 self.sp = self.sp.wrapping_sub(1);
                 mmu.write_byte(self.sp, (ret >> 8) as u8);
                 self.sp = self.sp.wrapping_sub(1);
@@ -177,6 +189,22 @@ impl Cpu {
                 return 20;
             }
         }
+
+        if (0x8000..0xC000).contains(&self.pc) {
+            println!(
+                "[PC I VRAM/CART] PC={:04X} från {:04X} SP={:04X} HL={:04X} FFC0={:02X} FFCD={:02X} FFE1={:02X}",
+                self.pc,
+                self.last_rom_pc,
+                self.sp,
+                self.get_hl(),
+                mmu.read_byte(0xFFC0),
+                mmu.read_byte(0xFFCD),
+                mmu.read_byte(0xFFE1)
+            );
+            self.debug_dump();
+            return 0;
+        }
+
         let opcode = mmu.read_byte(self.pc);
         self.pc = self.pc.wrapping_add(1);
 
@@ -380,20 +408,34 @@ impl Cpu {
                 self.e = val;
                 8
             }
+            0x63 => {
+                self.h = self.e;
+                4
+            }
+            0x61 => {
+                // LD H, C
+                self.h = self.c;
+                4
+            }
             0x66 => {
                 // LD H, (HL)
                 self.h = mmu.read_byte(self.get_hl());
                 8
             }
             0x67 => {
-                // LD L, H (Load register H into L)
-                self.l = self.h;
+                // LD H, A (Load register A into H)
+                self.h = self.a;
                 4
             }
             0x6E => {
                 // LD L, (HL)
                 self.l = mmu.read_byte(self.get_hl());
                 8
+            }
+            0x6C => {
+                // LD, L, H
+                self.l = self.a;
+                4
             }
             0x6F => {
                 // LD L, A (Load register A into L)
@@ -436,9 +478,23 @@ impl Cpu {
             }
 
             0xE9 => {
-                // JP (HL) (Jump to the 16-bit address contained in HL)
-                self.pc = self.get_hl();
-                4 // Tar 4 klockcykler
+                let hl = self.get_hl();
+                if hl >= 0x8000 {
+                    println!(
+                        "JP (HL) HL={:04X} A={:02X} från {:04X} FFC0={:02X} FFCD={:02X} FFE1={:02X}",
+                        hl,
+                        self.a,
+                        self.pc.wrapping_sub(1),
+                        mmu.read_byte(0xFFC0),
+                        mmu.read_byte(0xFFCD),
+                        mmu.read_byte(0xFFE1)
+                    );
+                }
+                if self.pc.wrapping_sub(1) < 0x8000 {
+                    self.last_rom_pc = self.pc.wrapping_sub(1);
+                }
+                self.pc = hl;
+                4
             }
 
             0x03 => {
@@ -517,17 +573,21 @@ impl Cpu {
                 12 // Tar 12 klockcykler
             }
             0x12 => {
-                // LD (DE), A (Write register A to memory address DE)
                 let addr = self.get_de();
+                if (0xC000..0xC0A0).contains(&addr) || (0x2B00..0x2C00).contains(&addr) {
+                    println!("(DE)={:04X} A={:02X}", addr, self.a);
+                }
                 mmu.write_byte(addr, self.a);
-                8 // Tar 8 klockcykler
+                8
             }
 
             0x02 => {
-                // LD (BC), A (Write register A to memory address BC)
                 let addr = self.get_bc();
+                if (0xC000..0xC0A0).contains(&addr) || (0x2B00..0x2C00).contains(&addr) {
+                    println!("(BC)={:04X} A={:02X}", addr, self.a);
+                }
                 mmu.write_byte(addr, self.a);
-                8 // Tar 8 klockcykler
+                8
             }
 
             0x1A => {
@@ -659,19 +719,13 @@ impl Cpu {
             }
 
             0x32 => {
-                // LD (HL-), A (Write register A to memory address HL, then decremnt HL)
+                // LD (HL-), A
                 let addr = self.get_hl();
                 mmu.write_byte(addr, self.a);
-
-                // Decrease HL by 1
-                let new_hl = addr.wrapping_sub(1);
-                self.set_hl(new_hl);
-
-                8 // 8 cycles
+                self.set_hl(addr.wrapping_sub(1));
+                8
             }
-
             0x05 => {
-                // DEC B
                 let half_carry = (self.b & 0x0F) == 0x00;
                 self.b = self.b.wrapping_sub(1);
                 self.set_flags(self.b == 0, true, half_carry, self.get_c());
@@ -691,31 +745,31 @@ impl Cpu {
             }
 
             0x0D => {
-                // DEC C
-                let half_carry = (self.c & 0x0F) == 0x00;
-                self.c = self.c.wrapping_sub(1);
-                self.set_flags(self.c == 0, true, half_carry, self.get_c());
+                // DEC C — yttre loopen
+                let old = self.c;
+                self.c = old.wrapping_sub(1);
+                self.set_flags(self.c == 0, true, (old & 0x0F) == 0, self.get_c());
                 4
             }
             0x15 => {
                 // DEC D
-                let half_carry = (self.d & 0x0F) == 0x00;
-                self.d = self.d.wrapping_sub(1);
-                self.set_flags(self.d == 0, true, half_carry, self.get_c());
+                let old = self.d;
+                self.d = old.wrapping_sub(1);
+                self.set_flags(self.d == 0, true, (old & 0x0F) == 0, self.get_c());
                 4
             }
             0x1D => {
                 // DEC E
-                let half_carry = (self.e & 0x0F) == 0x00;
-                self.e = self.e.wrapping_sub(1);
-                self.set_flags(self.e == 0, true, half_carry, self.get_c());
+                let old = self.e;
+                self.e = old.wrapping_sub(1);
+                self.set_flags(self.e == 0, true, (old & 0x0F) == 0, self.get_c());
                 4
             }
             0x25 => {
                 // DEC H
-                let half_carry = (self.h & 0x0F) == 0x00;
-                self.h = self.h.wrapping_sub(1);
-                self.set_flags(self.h == 0, true, half_carry, self.get_c());
+                let old = self.h;
+                self.h = old.wrapping_sub(1);
+                self.set_flags(self.h == 0, true, (old & 0x0F) == 0, self.get_c());
                 4
             }
 
@@ -745,19 +799,19 @@ impl Cpu {
 
             0x2D => {
                 // DEC L
-                let half_carry = (self.l & 0x0F) == 0x00;
-                self.l = self.l.wrapping_sub(1);
-                self.set_flags(self.l == 0, true, half_carry, self.get_c());
-                4
-            }
-            0x3D => {
-                // DEC A
-                let half_carry = (self.a & 0x0F) == 0x00;
-                self.a = self.a.wrapping_sub(1);
-                self.set_flags(self.a == 0, true, half_carry, self.get_c());
+                let old = self.l;
+                self.l = old.wrapping_sub(1);
+                self.set_flags(self.l == 0, true, (old & 0x0F) == 0, self.get_c());
                 4
             }
 
+            0x3D => {
+                // DEC A
+                let old = self.a;
+                self.a = old.wrapping_sub(1);
+                self.set_flags(self.a == 0, true, (old & 0x0F) == 0, self.get_c());
+                4
+            }
             0x20 => {
                 // JR NZ r8 (Jump Relative if Not Zero)
                 // Read jump-offset as a signed i8
@@ -810,37 +864,30 @@ impl Cpu {
             }
 
             0x3E => {
-                // LD A, n (load 8-bit immediate value into register A)
+                // LD A, n
                 let n = mmu.read_byte(self.pc);
-                self.pc += 1;
+                self.pc = self.pc.wrapping_add(1);
                 self.a = n;
-                8 // 8 cycles
+                8
             }
-
             0xF3 => {
                 self.ime = false;
                 4
             }
 
             0xE0 => {
-                // LDH (n), A (Write register A to memory address 0xFF00 +n)
-                let n = mmu.read_byte(self.pc) as u16;
-                self.pc += 1;
-
-                let addr = 0xFF00 | n; // Or 0xFF00 + n
-                mmu.write_byte(addr, self.a);
-                12 // 12 cycles
+                let n = mmu.read_byte(self.pc);
+                self.pc = self.pc.wrapping_add(1);
+                mmu.write_byte(0xFF00 | n as u16, self.a);
+                12
             }
 
             0xF0 => {
-                // LDH A, (n) (Read from memory address 0xFF00 +n into register A)
-                let n = mmu.read_byte(self.pc) as u16;
-                self.pc += 1;
-
-                let addr = 0xFF00 | n;
-                let value = mmu.read_byte(addr);
-                self.a = value;
-                12 // 12 cycles
+                let n = mmu.read_byte(self.pc);
+                self.pc = self.pc.wrapping_add(1);
+                let addr = 0xFF00 | n as u16;
+                self.a = mmu.read_byte(addr);
+                12
             }
 
             0xFE => {
@@ -868,15 +915,16 @@ impl Cpu {
             }
 
             0xEA => {
-                // LD (nn), A (Write register A to absolute 16-bit address nn)
                 let low = mmu.read_byte(self.pc) as u16;
-                self.pc += 1;
+                self.pc = self.pc.wrapping_add(1);
                 let high = mmu.read_byte(self.pc) as u16;
-                self.pc += 1;
-
-                let nn = (high << 8) | low;
-                mmu.write_byte(nn, self.a);
-                16 // 16 cycles
+                self.pc = self.pc.wrapping_add(1);
+                let addr = (high << 8) | low;
+                if (0xC000..0xC0A0).contains(&addr) {
+                    println!("EA [{:04X}]={:02X}", addr, self.a);
+                }
+                mmu.write_byte(addr, self.a);
+                16
             }
 
             0xFA => {
@@ -932,15 +980,13 @@ impl Cpu {
             }
 
             0x22 => {
-                // LD (HL+), A (Write register A to memory address HL, then increment HL)
                 let addr = self.get_hl();
+                /*                 if (0xC000..0xC0A0).contains(&addr) || (0x2B00..0x2C00).contains(&addr) {
+                    println!("LDI (HL)={:04X} A={:02X}", addr, self.a);
+                } */
                 mmu.write_byte(addr, self.a);
-
-                // Öka HL med 1 säkert
-                let new_hl = addr.wrapping_add(1);
-                self.set_hl(new_hl);
-
-                8 // Tar 8 klockcykler
+                self.set_hl(addr.wrapping_add(1));
+                8
             }
             0xE2 => {
                 // LD ($FF00+C), A (Write register A to memory address 0xFF00 + register C)
@@ -1044,82 +1090,78 @@ impl Cpu {
 
             0x04 => {
                 // INC B
-                let half_carry = (self.b & 0x0F) == 0x0F;
-                self.b = self.b.wrapping_add(1);
-                self.set_flags(self.b == 0, false, half_carry, self.get_c());
+                let old = self.b;
+                self.b = old.wrapping_add(1);
+                self.set_flags(self.b == 0, false, (old & 0x0F) == 0x0F, self.get_c());
                 4
             }
 
             0x0C => {
-                // INC c (Increment register C by 1)
-                let half_carry = (self.c & 0x0F) == 0x0F;
-                self.c = self.c.wrapping_add(1);
-                self.set_flags(self.c == 0, false, half_carry, self.get_c());
-                4 // 4 cycles
+                let old = self.c;
+                self.c = old.wrapping_add(1);
+                self.set_flags(self.c == 0, false, (old & 0x0F) == 0x0F, self.get_c());
+                4
             }
 
             0x14 => {
                 // INC D
-                let half_carry = (self.d & 0x0F) == 0x0F;
-                self.d = self.d.wrapping_add(1);
-                self.set_flags(self.d == 0, false, half_carry, self.get_c());
+                let old = self.d;
+                self.d = old.wrapping_add(1);
+                self.set_flags(self.d == 0, false, (old & 0x0F) == 0x0F, self.get_c());
                 4
             }
 
             0x1C => {
                 // INC E
-                let half_carry = (self.e & 0x0F) == 0x0F;
-                self.e = self.e.wrapping_add(1);
-                self.set_flags(self.e == 0, false, half_carry, self.get_c());
+                let old = self.e;
+                self.e = old.wrapping_add(1);
+                self.set_flags(self.e == 0, false, (old & 0x0F) == 0x0F, self.get_c());
                 4
             }
 
             0x24 => {
                 // INC H
-                let half_carry = (self.h & 0x0F) == 0x0F;
-                self.h = self.h.wrapping_add(1);
-                self.set_flags(self.h == 0, false, half_carry, self.get_c());
+                let old = self.h;
+                self.h = old.wrapping_add(1);
+                self.set_flags(self.h == 0, false, (old & 0x0F) == 0x0F, self.get_c());
                 4
             }
             0x2C => {
                 // INC L
-                let half_carry = (self.l & 0x0F) == 0x0F;
-                self.l = self.l.wrapping_add(1);
-                self.set_flags(self.l == 0, false, half_carry, self.get_c());
+                let old = self.l;
+                self.l = old.wrapping_add(1);
+                self.set_flags(self.l == 0, false, (old & 0x0F) == 0x0F, self.get_c());
                 4
             }
+
             0x3C => {
                 // INC A
-                let half_carry = (self.a & 0x0F) == 0x0F;
-                self.a = self.a.wrapping_add(1);
-                self.set_flags(self.a == 0, false, half_carry, self.get_c());
+                let old = self.a;
+                self.a = old.wrapping_add(1);
+                self.set_flags(self.a == 0, false, (old & 0x0F) == 0x0F, self.get_c());
                 4
             }
 
-            0x0CD => {
-                // CALL nn (Call subroutine at 16-bit absolute address nn)
+            0xCD => {
+                // CALL nn
                 let low = mmu.read_byte(self.pc) as u16;
-                self.pc += 1;
+                self.pc = self.pc.wrapping_add(1);
                 let high = mmu.read_byte(self.pc) as u16;
-                self.pc += 1;
-
+                self.pc = self.pc.wrapping_add(1);
                 let nn = (high << 8) | low;
 
-                // Store current return address (PC) to stack (little endian)
-                let return_addr = self.pc;
-
-                // Decrease SP and write high byte
+                /*                 let call_addr = self.pc.wrapping_sub(3);
+                               if (0x0170..0x01E0).contains(&call_addr) {
+                                   println!("VBlank CALL {:04X} från {:04X}", nn, call_addr);
+                               }
+                */
+                let ret = self.pc;
                 self.sp = self.sp.wrapping_sub(1);
-                mmu.write_byte(self.sp, (return_addr >> 8) as u8);
-
-                // Decrease SP and write low byte
+                mmu.write_byte(self.sp, (ret >> 8) as u8);
                 self.sp = self.sp.wrapping_sub(1);
-                mmu.write_byte(self.sp, (return_addr & 0xFF) as u8);
-
-                // JUmp to new function
+                mmu.write_byte(self.sp, ret as u8);
                 self.pc = nn;
-
-                24 // uses 24 cycles
+                24
             }
 
             0x70 => {
@@ -1153,8 +1195,11 @@ impl Cpu {
                 8
             }
             0x77 => {
-                // LD (HL), A
-                mmu.write_byte(self.get_hl(), self.a);
+                let addr = self.get_hl();
+                if (0xC000..0xC0A0).contains(&addr) || (0x2B00..0x2C00).contains(&addr) {
+                    println!("(HL)={:04X} A={:02X}", addr, self.a);
+                }
+                mmu.write_byte(addr, self.a);
                 8
             }
 
@@ -1621,6 +1666,36 @@ impl Cpu {
                 4
             }
 
+            0x27 => {
+                // DAA
+                let mut a = self.a;
+                let mut adjust = 0u8;
+                let mut c = self.get_c();
+
+                if !self.get_n() {
+                    if self.get_c() || a > 0x99 {
+                        adjust |= 0x60;
+                        c = true;
+                    }
+                    if self.get_h() || (a & 0x0F) > 0x09 {
+                        adjust |= 0x06;
+                    }
+                    a = a.wrapping_add(adjust);
+                } else {
+                    if self.get_c() {
+                        adjust |= 0x60;
+                    }
+                    if self.get_h() {
+                        adjust |= 0x06;
+                    }
+                    a = a.wrapping_sub(adjust);
+                }
+
+                self.a = a;
+                self.set_flags(self.a == 0, self.get_n(), false, c);
+                4
+            }
+
             0xC1 => {
                 // POP BC
                 self.c = mmu.read_byte(self.sp);
@@ -1932,13 +2007,11 @@ impl Cpu {
                 16
             }
             0xEF => {
-                // RST 28H
-                let high = ((self.pc >> 8) & 0xFF) as u8;
-                let low = (self.pc & 0xFF) as u8;
+                let return_addr = self.pc;
                 self.sp = self.sp.wrapping_sub(1);
-                mmu.write_byte(self.sp, high);
+                mmu.write_byte(self.sp, (return_addr >> 8) as u8);
                 self.sp = self.sp.wrapping_sub(1);
-                mmu.write_byte(self.sp, low);
+                mmu.write_byte(self.sp, (return_addr & 0xFF) as u8);
                 self.pc = 0x0028;
                 16
             }
@@ -1963,6 +2036,14 @@ impl Cpu {
                 mmu.write_byte(self.sp, low);
                 self.pc = 0x0038;
                 16
+            }
+
+            0x76 => {
+                // HALT: vakna när IE & IF & 0x1F != 0
+                if (mmu.read_byte(0xFFFF) & mmu.read_byte(0xFF0F) & 0x1F) == 0 {
+                    self.pc = self.pc.wrapping_sub(1); // kör HALT igen nästa step
+                }
+                4
             }
 
             _ => {

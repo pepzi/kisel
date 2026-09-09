@@ -7,6 +7,7 @@ pub struct Mmu {
     buttons: u8,
     /// bit3=Down bit2=Up bit1=Left bit0=Right
     dpad: u8,
+    pub div_cycles: u32,
 }
 
 impl Mmu {
@@ -15,6 +16,7 @@ impl Mmu {
             memory: [0; 65536],
             buttons: 0x0F,
             dpad: 0x0F,
+            div_cycles: 0,
         }
     }
 
@@ -68,7 +70,70 @@ impl Mmu {
 
     // Writes a byte to a specific 16 bit address
     pub fn write_byte(&mut self, addr: u16, value: u8) {
+        if addr == 0xFF04 {
+            self.memory[0xFF04] = 0; // skrivning nollställer DIV
+            self.div_cycles = 0;
+            return;
+        }
+
+        /*         if addr == 0xFF8D || addr == 0xFF8E {
+            println!("{:04X}={:02X}", addr, value);
+        }
+
+        if addr == 0xFF8F {
+            println!("FF8F={:02X}", value);
+        } */
+
+        /*         if addr == 0xFFE1 {
+                   println!("FFE1={:02X}", value);
+               }
+               if addr == 0xFFAB {
+                   println!("paus={:02X}", value);
+               }
+        */
+        /*         if (0xC000..0xC0A0).contains(&addr) && value != 0 {
+                   println!("OAM-buf [{:04X}]={:02X}", addr, value);
+               }
+        */
+        /*         if addr == 0xFF85 {
+                   println!("skriv FF85={:02X}", value);
+               }
+        */
+        if addr == 0xFF02 && value == 0x81 {
+            let c = self.memory[0xFF01] as char;
+            print!("{}", c);
+            self.memory[0xFF02] = 0;
+            return;
+        }
+
+        if addr == 0xFF46 {
+            // OAM DMA: kopiera 160 byte från value*0x100 till 0xFE00
+            let src = (value as u16) << 8;
+            for i in 0..160u16 {
+                self.memory[0xFE00 + i as usize] = self.memory[(src + i) as usize];
+            }
+            self.memory[0xFF46] = value;
+            return;
+        }
+
+        if addr == 0xFF00 {
+            self.memory[0xFF00] = value & 0x30;
+            return;
+        }
+
+        if addr < 0x8000 {
+            return;
+        }
+
         self.memory[addr as usize] = value;
+    }
+
+    pub fn tick_div(&mut self, cycles: u32) {
+        self.div_cycles += cycles;
+        while self.div_cycles >= 256 {
+            self.div_cycles -= 256;
+            self.memory[0xFF04] = self.memory[0xFF04].wrapping_add(1);
+        }
     }
 
     pub fn load_rom(&mut self, path: &str) {

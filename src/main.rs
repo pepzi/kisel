@@ -1,9 +1,7 @@
 mod cpu;
 mod mmu;
 use minifb::{Key, Window, WindowOptions};
-use std::env;
-use std::println;
-use std::vec;
+use std::{env, println};
 
 use cpu::Cpu;
 use mmu::Mmu;
@@ -12,20 +10,16 @@ const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
 
 fn main() {
-    // Get arguments from command
     let args: Vec<String> = env::args().collect();
-
-    // Check if user send an argument, otherwise set "noise" as standard
     let mode = if args.len() > 1 {
         args[1].as_str()
     } else {
         "noise"
     };
 
-    // 2. Run selected mode
     match mode {
         "cpu" => {
-            println!("Starting Game Boy Emulator in CPU-test mode (dummy ROM)...");
+            println!("Starting Game Boy Emulator in CPU-test mode...");
             run_cpu_test();
         }
         "noise" => {
@@ -42,14 +36,19 @@ fn run_cpu_test() {
     let mut mmu = Mmu::new();
     let mut cpu = Cpu::new();
 
-    mmu.load_rom("tetris.gb");
+    mmu.load_rom("Tetris.gb");
 
-    println!("Staring executing from 0x0100 with graphical output...");
+    // i run_cpu_test, en gång efter load_rom
+    print!("ROM1FF0:");
+    for i in 0..24u16 {
+        print!(" {:02X}", mmu.read_byte(0x1FF0 + i));
+    }
+    println!();
 
-    // 1. Create an empty pixel buffer (framebuffer) for Tetris (160x144 pixels)
+    println!("Starting executing from 0x0100 with graphical output...");
+
     let mut buffer: Vec<u32> = vec![0; SCREEN_WIDTH * SCREEN_HEIGHT];
 
-    // 2. Open window specifically for CPU-mode (Scale::X4 to match noise-mode)
     let mut window = Window::new(
         "Rust GBEMU - Tetris Mode",
         SCREEN_WIDTH,
@@ -63,10 +62,8 @@ fn run_cpu_test() {
 
     window.set_target_fps(60);
 
-    // Create a cycle counter before the start of the loop
     let mut cycle_accumulator: u32 = 0;
 
-    // 3. Replace loop to keep it running as long as the window is open
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let mut buttons = 0x0Fu8;
         let mut dpad = 0x0Fu8;
@@ -82,16 +79,16 @@ fn run_cpu_test() {
         if window.is_key_down(Key::X) {
             buttons &= !0x01;
         }
-        if window.is_key_down(Key::S) {
+        if window.is_key_down(Key::S) | window.is_key_down(Key::Down) {
             dpad &= !0x08;
         }
-        if window.is_key_down(Key::W) {
+        if window.is_key_down(Key::W) | window.is_key_down(Key::Up) {
             dpad &= !0x04;
         }
-        if window.is_key_down(Key::A) {
+        if window.is_key_down(Key::A) | window.is_key_down(Key::Left) {
             dpad &= !0x02;
         }
-        if window.is_key_down(Key::D) {
+        if window.is_key_down(Key::D) | window.is_key_down(Key::Right) {
             dpad &= !0x01;
         }
         mmu.set_joypad(buttons, dpad);
@@ -99,6 +96,7 @@ fn run_cpu_test() {
         let mut frame_cycles = 0;
         while frame_cycles < 70224 {
             let cycles = cpu.step(&mut mmu);
+            mmu.tick_div(cycles);
 
             if cycles == 0 {
                 println!(
@@ -107,90 +105,242 @@ fn run_cpu_test() {
                 std::process::exit(1);
             }
 
-            // Count Cycles for timing
             frame_cycles += cycles;
             cycle_accumulator += cycles;
 
-            // One scanline takes exactly 456 clock cycles on a Game Boy
             if cycle_accumulator >= 456 {
                 cycle_accumulator -= 456;
-
                 let current_ly = mmu.read_byte(0xFF44);
-                // Increase LY safe and roll over after 154 lines
-                mmu.write_byte(0xFF44, (current_ly + 1) % 154);
+                mmu.write_byte(0xFF44, current_ly.wrapping_add(1) % 154);
             }
         }
 
-        // =================================================================
-        // HÄR FUSKAR VI IN V-BLANK PÅ ETT SÄKERT SÄTT! 🚀
-        // Vi pillar INTE på stacken eller PC, utan uppdaterar bara minnesflaggorna.
-        // =================================================================
-
-        // Bit 0 på adress 0xFF0F är hårdvarans V-Blank Interrupt-flagga
         let current_if = mmu.read_byte(0xFF0F);
         mmu.write_byte(0xFF0F, current_if | 0x01);
 
-        // Let's draw the TETRIS-SCREEN!
-        // We read directly from the Game Boy VRAM and translate to our screen.
-
-        // Läs av Game Boys officiella skärmkontroll-register
         let lcdc = mmu.read_byte(0xFF40);
-
-        // Bit 7 in LCDC decides if the LCD screen is on.
-        // If the game has turned the screen off, we just draw a blank screen
         let lcd_on = (lcdc & 0x80) != 0;
+        let colors = [0xFFFFFFFF, 0xFFB5B5B5, 0xFF6B6B6B, 0xFF000000];
 
         if !lcd_on {
-            // Screen is off - make entire buffer blank/white
             for pixel in buffer.iter_mut() {
                 *pixel = 0xFF8BAC0F;
             }
         } else {
-            // Define Game Boys 4 classical gray/green tones (ARGB format)
-            let colors = [0xFFFFFFFF, 0xFFB5B5B5, 0xFF6B6B6B, 0x00000000];
+            draw_layer(&mmu, &mut buffer, &colors, false);
+            if lcdc & 0x20 != 0 {
+                draw_layer(&mmu, &mut buffer, &colors, true);
+            }
+            draw_sprites(&mmu, &mut buffer, &colors, lcdc);
 
-            for y in 0..SCREEN_HEIGHT {
-                for x in 0..SCREEN_WIDTH {
-                    // Find which 8x8 block we are currently at in the background map
-                    let tile_x = x / 8;
-                    let tile_y = y / 8;
-
-                    // The Game Boy background map starts at memory address 0x9800
-                    let map_addr = (0x9800 + (tile_y * 32) + tile_x) as u16;
-                    let tile_id = mmu.read_byte(map_addr) as u16;
-
-                    // Calculate exactly where in the pixel data block to read (each row is 2 bytes)
-                    let pixel_x = x % 8;
-                    let pixel_y = y % 8;
-
-                    // Graphics data start address in VRAM (0x8000)
-                    let tile_data_addr = 0x8000 + (tile_id * 16) + (pixel_y as u16 * 2);
-
-                    // Game Boy stores colors in a smart "2bpp" format (2 bits per pixel)
-                    let byte1 = mmu.read_byte(tile_data_addr);
-                    let byte2 = mmu.read_byte(tile_data_addr + 1);
-
-                    // Fetch the two bits for this specific pixel
-                    let bit_index = 7 - pixel_x;
-                    let color_bit1 = (byte1 >> bit_index) & 1;
-                    let color_bit2 = (byte2 >> bit_index) & 1;
-                    let color_id = (color_bit2 << 1) | color_bit1;
-
-                    // Store correct pixel color in our minifb framebuffer
-                    buffer[y * SCREEN_WIDTH + x] = colors[color_id as usize];
+            if window.is_key_pressed(Key::P, minifb::KeyRepeat::No) {
+                let lcdc = mmu.read_byte(0xFF40);
+                println!(
+                    "LCDC={:02X} LY={} DIV={:02X} PC={:04X} FFC0={:02X} FFCD={:02X} FFE1={:02X}",
+                    lcdc,
+                    mmu.read_byte(0xFF44),
+                    mmu.read_byte(0xFF04),
+                    cpu.pc,
+                    mmu.read_byte(0xFFC0),
+                    mmu.read_byte(0xFFCD),
+                    mmu.read_byte(0xFFE1)
+                );
+                print!("map9800:");
+                for i in 0..16u16 {
+                    print!(" {:02X}", mmu.read_byte(0x9800 + i));
                 }
+                println!();
+                print!("tile2F:");
+                for i in 0..16u16 {
+                    print!(" {:02X}", mmu.read_byte(0x8000 + 0x2F * 16 + i));
+                }
+                println!();
+                print!("oam:");
+                for i in 0..16u16 {
+                    print!(" {:02X}", mmu.read_byte(0xFE00 + i));
+                }
+                println!();
+                print!("@0062:");
+                for i in 0..16u16 {
+                    print!(" {:02X}", mmu.read_byte(0x0062 + i));
+                }
+                println!();
+                print!("@00C0:");
+                for i in 0..8u16 {
+                    print!(" {:02X}", mmu.read_byte(0x00C0 + i));
+                }
+                println!();
+                println!(
+                    "FF80={:02X} FF85={:02X} FFCD={:02X} FFE1={:02X}",
+                    mmu.read_byte(0xFF80),
+                    mmu.read_byte(0xFF85),
+                    mmu.read_byte(0xFFCD),
+                    mmu.read_byte(0xFFE1)
+                );
+                println!();
+                print!("C080:");
+                for i in 0..16u16 {
+                    print!(" {:02X}", mmu.read_byte(0xC080 + i));
+                }
+                println!();
+                print!("00CC:");
+                for i in 0..4u16 {
+                    print!(" {:02X}", mmu.read_byte(0x00CC + i));
+                }
+                println!();
+                println!("-----------------------");
+                println!(
+                    "LCDC={:02X} IME={} IE={:02X} IF={:02X}",
+                    mmu.read_byte(0xFF40),
+                    cpu.ime,
+                    mmu.read_byte(0xFFFF),
+                    mmu.read_byte(0xFF0F)
+                );
+                print!("FE00:");
+                for i in 0..16u16 {
+                    print!(" {:02X}", mmu.read_byte(0xFE00 + i));
+                }
+                println!();
+                print!("C000:");
+                for i in 0..16u16 {
+                    print!(" {:02X}", mmu.read_byte(0xC000 + i));
+                }
+                println!();
+                print!("C200:");
+                for i in 0..16u16 {
+                    print!(" {:02X}", mmu.read_byte(0xC200 + i));
+                }
+                println!();
+                println!(
+                    "FFB6(dma)={:02X} FF85={:02X}",
+                    mmu.read_byte(0xFFB6),
+                    mmu.read_byte(0xFF85)
+                );
+
+                println!("-------------");
+                println!(
+                    "FFE1(state)={:02X} C213(next)={:02X} FF98(drop)={:02X}",
+                    mmu.read_byte(0xFFE1),
+                    mmu.read_byte(0xC213),
+                    mmu.read_byte(0xFF98)
+                );
+                print!("C200:");
+                for i in 0..32u16 {
+                    print!(" {:02X}", mmu.read_byte(0xC200 + i));
+                }
+                println!();
+                println!("----------------");
+                println!(
+                    "FFAB(paus)={:02X} FFA6={:02X} FFA9(lvl)={:02X} C201={:02X}",
+                    mmu.read_byte(0xFFAB),
+                    mmu.read_byte(0xFFA6),
+                    mmu.read_byte(0xFFA9),
+                    mmu.read_byte(0xC201)
+                );
+
+                println!("----------------");
+
+                println!(
+                    "FF8D={:02X}{:02X} FF8F(count)={:02X} FF98={:02X} FF9A={:02X}",
+                    mmu.read_byte(0xFF8D),
+                    mmu.read_byte(0xFF8E),
+                    mmu.read_byte(0xFF8F),
+                    mmu.read_byte(0xFF98),
+                    mmu.read_byte(0xFF9A)
+                );
             }
         }
 
-        // 6. Send our buffer to the window once per frame
         window
             .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
             .unwrap();
     }
 }
 
+fn tile_addr(_mmu: &Mmu, lcdc: u8, tile_id: u8, row: u8) -> u16 {
+    let base = if lcdc & 0x10 != 0 {
+        0x8000u16 + tile_id as u16 * 16
+    } else {
+        (0x9000i32 + tile_id as i8 as i32 * 16) as u16
+    };
+    base + row as u16 * 2
+}
+
+fn draw_layer(mmu: &Mmu, buffer: &mut [u32], colors: &[u32; 4], window: bool) {
+    let lcdc = mmu.read_byte(0xFF40);
+    let (ox, oy, map_base) = if window {
+        let wx = mmu.read_byte(0xFF4B) as i32 - 7;
+        let wy = mmu.read_byte(0xFF4A) as i32;
+        let map = if lcdc & 0x40 != 0 { 0x9C00 } else { 0x9800 };
+        (wx, wy, map)
+    } else {
+        let map = if lcdc & 0x08 != 0 { 0x9C00 } else { 0x9800 };
+        (
+            -(mmu.read_byte(0xFF43) as i32),
+            -(mmu.read_byte(0xFF42) as i32),
+            map,
+        )
+    };
+
+    for y in 0..SCREEN_HEIGHT as i32 {
+        for x in 0..SCREEN_WIDTH as i32 {
+            let lx = if window { x - ox } else { x - ox };
+            let ly = if window { y - oy } else { y - oy };
+            if window && (lx < 0 || ly < 0) {
+                continue;
+            }
+            let px = ((lx as u32) % 256) as u16;
+            let py = ((ly as u32) % 256) as u16;
+            let tile_id = mmu.read_byte(map_base + (py / 8) * 32 + (px / 8));
+            let addr = tile_addr(mmu, lcdc, tile_id, (py % 8) as u8);
+            let b1 = mmu.read_byte(addr);
+            let b2 = mmu.read_byte(addr + 1);
+            let bit = 7 - (px % 8);
+            let cid = (((b2 >> bit) & 1) << 1) | ((b1 >> bit) & 1);
+            buffer[y as usize * SCREEN_WIDTH + x as usize] = colors[cid as usize];
+        }
+    }
+}
+
+fn draw_sprites(mmu: &Mmu, buffer: &mut [u32], colors: &[u32; 4], lcdc: u8) {
+    if lcdc & 0x02 == 0 {
+        return;
+    }
+    let tall = lcdc & 0x04 != 0;
+    for i in 0..40u16 {
+        let o = 0xFE00 + i * 4;
+        let sy = mmu.read_byte(o) as i32 - 16;
+        let sx = mmu.read_byte(o + 1) as i32 - 8;
+        let tile = mmu.read_byte(o + 2);
+        let attr = mmu.read_byte(o + 3);
+        let h = if tall { 16 } else { 8 };
+        for row in 0..h {
+            let ry = if attr & 0x40 != 0 { h - 1 - row } else { row };
+            let tid = if tall {
+                (tile & 0xFE) + if ry >= 8 { 1 } else { 0 }
+            } else {
+                tile
+            };
+            let addr = 0x8000 + tid as u16 * 16 + (ry as u16 % 8) * 2;
+            let b1 = mmu.read_byte(addr);
+            let b2 = mmu.read_byte(addr + 1);
+            for col in 0..8 {
+                let bit = if attr & 0x20 != 0 { col } else { 7 - col };
+                let cid = (((b2 >> bit) & 1) << 1) | ((b1 >> bit) & 1);
+                if cid == 0 {
+                    continue;
+                }
+                let px = sx + col;
+                let py = sy + row;
+                if (0..160).contains(&px) && (0..144).contains(&py) {
+                    buffer[py as usize * SCREEN_WIDTH + px as usize] = colors[cid as usize];
+                }
+            }
+        }
+    }
+}
+
 fn run_graphic_noise() {
-    // Create empty pixel-buffer (minifb wants 32-bit ARGB pixels)
     let mut buffer: Vec<u32> = vec![0; SCREEN_WIDTH * SCREEN_HEIGHT];
 
     let mut window = Window::new(
@@ -204,29 +354,19 @@ fn run_graphic_noise() {
     )
     .unwrap_or_else(|e| panic!("{}", e));
 
-    // Limit frame rate to around 60 Hz
     window.set_target_fps(60);
 
-    // Main loop: Running as long as window is open and ESC isn't pressed
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        // 1. This is where the emulation loop will run instructions in the future:
-        // cpu.step(&mut mmu);
-
-        // 2. Create white noise to see the window "alive"
         for pixel in buffer.iter_mut() {
-            let rand_val = rand_brightness(); // Random grey-scale
+            let rand_val = rand_brightness();
             *pixel = (255 << 24) | (rand_val << 16) | (rand_val << 8) | rand_val;
         }
-
-        // 3. Update windows with pixel buffer
         window
             .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
             .unwrap();
     }
 }
 
-// Simple and fast helper method to create a random value between 0 and 255
-// without the rand-crate
 fn rand_brightness() -> u32 {
     static mut SEED: u32 = 123456789;
     unsafe {
