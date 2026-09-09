@@ -8,35 +8,35 @@ use mmu::Mmu;
 
 const SCREEN_WIDTH: usize = 160;
 const SCREEN_HEIGHT: usize = 144;
-
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mode = if args.len() > 1 {
-        args[1].as_str()
-    } else {
-        "noise"
-    };
+
+    let mode = args.get(1).map(|s| s.as_str()).unwrap_or("noise");
 
     match mode {
         "cpu" => {
+            let rom = args.get(2).map(|s| s.as_str()).unwrap_or("tetris.gb");
             println!("Starting Game Boy Emulator in CPU-test mode...");
-            run_cpu_test();
+            run_cpu_test(rom);
         }
         "noise" => {
             println!("Running in windowed mode with graphical noise...");
             run_graphic_noise();
         }
         _ => {
-            println!("Unknown argument '{}'. Use 'cpu' or 'noise'.", mode);
+            println!(
+                "Unknown argument '{}'. Use 'cpu' [rom.gb] or 'noise'.",
+                mode
+            );
         }
     }
 }
 
-fn run_cpu_test() {
+fn run_cpu_test(rom_path: &str) {
     let mut mmu = Mmu::new();
     let mut cpu = Cpu::new();
 
-    mmu.load_rom("Tetris.gb");
+    mmu.load_rom(rom_path);
 
     // i run_cpu_test, en gång efter load_rom
     print!("ROM1FF0:");
@@ -284,8 +284,8 @@ fn draw_layer(mmu: &Mmu, buffer: &mut [u32], colors: &[u32; 4], window: bool) {
 
     for y in 0..SCREEN_HEIGHT as i32 {
         for x in 0..SCREEN_WIDTH as i32 {
-            let lx = if window { x - ox } else { x - ox };
-            let ly = if window { y - oy } else { y - oy };
+            let lx = x - ox;
+            let ly = y - oy;
             if window && (lx < 0 || ly < 0) {
                 continue;
             }

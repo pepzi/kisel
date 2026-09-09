@@ -100,19 +100,19 @@ impl Cpu {
     }
 
     // Universal method to set or clear flag using bools
-    pub fn set_flags(&mut self, z: bool, n: bool, h: bool, c: bool) {
-        self.f = 0; // Zero out everything
+    fn set_flags(&mut self, z: bool, n: bool, h: bool, c: bool) {
+        self.f = 0;
         if z {
-            self.f |= Z_FLAG
+            self.f |= Z_FLAG;
         }
         if n {
-            self.f |= N_FLAG
+            self.f |= N_FLAG;
         }
         if h {
-            self.f |= H_FLAG
+            self.f |= H_FLAG;
         }
         if c {
-            self.f |= C_FLAG
+            self.f |= C_FLAG;
         }
     }
 
@@ -125,30 +125,29 @@ impl Cpu {
         }
     }
 
-    pub fn set_n(&mut self, value: bool) {
-        if value {
+    fn set_n(&mut self, v: bool) {
+        if v {
             self.f |= N_FLAG;
         } else {
             self.f &= !N_FLAG;
         }
     }
 
-    pub fn set_h(&mut self, value: bool) {
-        if value {
+    fn set_h(&mut self, v: bool) {
+        if v {
             self.f |= H_FLAG;
         } else {
             self.f &= !H_FLAG;
         }
     }
 
-    pub fn set_c(&mut self, value: bool) {
-        if value {
+    fn set_c(&mut self, v: bool) {
+        if v {
             self.f |= C_FLAG;
         } else {
             self.f &= !C_FLAG;
         }
     }
-
     // Run one instruction and return how many clock cycles it took
     pub fn step(&mut self, mmu: &mut Mmu) -> u32 {
         if self.ime {
@@ -412,6 +411,33 @@ impl Cpu {
                 self.h = self.e;
                 4
             }
+            0x64 => {
+                // LD H, H = NOOP
+                4
+            }
+            0x65 => {
+                // LD H, L
+                self.h = self.l;
+                4
+            }
+
+            0x68 => {
+                // LD L, B
+                self.l = self.b;
+                4
+            }
+
+            0x6A => {
+                // LD L, D
+                self.l = self.d;
+                4
+            }
+
+            0x6D => {
+                // LD L, L == noop
+                4
+            }
+
             0x61 => {
                 // LD H, C
                 self.h = self.c;
@@ -433,8 +459,8 @@ impl Cpu {
                 8
             }
             0x6C => {
-                // LD, L, H
-                self.l = self.a;
+                // LD L, H
+                self.l = self.h;
                 4
             }
             0x6F => {
@@ -451,6 +477,11 @@ impl Cpu {
                 // LD A, (HL)
                 self.a = mmu.read_byte(self.get_hl());
                 8
+            }
+
+            0x7F => {
+                // LD A, A == noop
+                4
             }
 
             0x60 => {
@@ -479,7 +510,7 @@ impl Cpu {
 
             0xE9 => {
                 let hl = self.get_hl();
-                if hl >= 0x8000 {
+                /*                 if hl >= 0x8000 {
                     println!(
                         "JP (HL) HL={:04X} A={:02X} från {:04X} FFC0={:02X} FFCD={:02X} FFE1={:02X}",
                         hl,
@@ -489,7 +520,7 @@ impl Cpu {
                         mmu.read_byte(0xFFCD),
                         mmu.read_byte(0xFFE1)
                     );
-                }
+                } */
                 if self.pc.wrapping_sub(1) < 0x8000 {
                     self.last_rom_pc = self.pc.wrapping_sub(1);
                 }
@@ -574,9 +605,6 @@ impl Cpu {
             }
             0x12 => {
                 let addr = self.get_de();
-                if (0xC000..0xC0A0).contains(&addr) || (0x2B00..0x2C00).contains(&addr) {
-                    println!("(DE)={:04X} A={:02X}", addr, self.a);
-                }
                 mmu.write_byte(addr, self.a);
                 8
             }
@@ -623,14 +651,6 @@ impl Cpu {
                 self.a ^= self.a; // Blir alltid 0
 
                 self.set_flags(true, false, false, false);
-                4 // 4 cycles
-            }
-
-            0xA9 => {
-                // XOR C (Exclusive OR register C with register A)
-                self.a ^= self.c; // Execute XOR and store in A
-
-                self.set_flags(self.a == 0, false, false, false);
                 4 // 4 cycles
             }
 
@@ -2046,6 +2066,303 @@ impl Cpu {
                 4
             }
 
+            0xC4 => {
+                // CALL NZ, nn
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc = self.pc.wrapping_add(1);
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc = self.pc.wrapping_add(1);
+                let nn = (high << 8) | low;
+                if !self.get_z() {
+                    let ret = self.pc;
+                    self.sp = self.sp.wrapping_sub(1);
+                    mmu.write_byte(self.sp, (ret >> 8) as u8);
+                    self.sp = self.sp.wrapping_sub(1);
+                    mmu.write_byte(self.sp, ret as u8);
+                    self.pc = nn;
+                    24
+                } else {
+                    12
+                }
+            }
+
+            0xCC => {
+                // CALL Z, nn
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc = self.pc.wrapping_add(1);
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc = self.pc.wrapping_add(1);
+                let nn = (high << 8) | low;
+                if self.get_z() {
+                    let ret = self.pc;
+                    self.sp = self.sp.wrapping_sub(1);
+                    mmu.write_byte(self.sp, (ret >> 8) as u8);
+                    self.sp = self.sp.wrapping_sub(1);
+                    mmu.write_byte(self.sp, ret as u8);
+                    self.pc = nn;
+                    24
+                } else {
+                    12
+                }
+            }
+
+            0xD4 => {
+                // CALL NC, nn
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc = self.pc.wrapping_add(1);
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc = self.pc.wrapping_add(1);
+                let nn = (high << 8) | low;
+                if !self.get_c() {
+                    let ret = self.pc;
+                    self.sp = self.sp.wrapping_sub(1);
+                    mmu.write_byte(self.sp, (ret >> 8) as u8);
+                    self.sp = self.sp.wrapping_sub(1);
+                    mmu.write_byte(self.sp, ret as u8);
+                    self.pc = nn;
+                    24
+                } else {
+                    12
+                }
+            }
+
+            0xDC => {
+                // CALL C, nn
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc = self.pc.wrapping_add(1);
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc = self.pc.wrapping_add(1);
+                let nn = (high << 8) | low;
+                if self.get_c() {
+                    let ret = self.pc;
+                    self.sp = self.sp.wrapping_sub(1);
+                    mmu.write_byte(self.sp, (ret >> 8) as u8);
+                    self.sp = self.sp.wrapping_sub(1);
+                    mmu.write_byte(self.sp, ret as u8);
+                    self.pc = nn;
+                    24
+                } else {
+                    12
+                }
+            }
+
+            0xAE => {
+                // XOR (HL)
+                self.a ^= mmu.read_byte(self.get_hl());
+                self.set_flags(self.a == 0, false, false, false);
+                8
+            }
+
+            0x1F => {
+                // RRA
+                let old_c = self.get_c();
+                let new_c = (self.a & 0x01) != 0;
+                self.a = (self.a >> 1) | if old_c { 0x80 } else { 0 };
+                self.set_flags(false, false, false, new_c);
+                4
+            }
+
+            0xCE => {
+                // ADC A, n
+                let n = mmu.read_byte(self.pc);
+                self.pc = self.pc.wrapping_add(1);
+                let c = if self.get_c() { 1u8 } else { 0 };
+                let half_carry = ((self.a & 0x0F) + (n & 0x0F) + c) > 0x0F;
+                let sum = self.a as u16 + n as u16 + c as u16;
+                self.a = sum as u8;
+                self.set_flags(self.a == 0, false, half_carry, sum > 0xFF);
+                8
+            }
+
+            0x29 => {
+                // ADD HL, HL
+                let hl = self.get_hl();
+                let half_carry = (hl & 0x0FFF) + (hl & 0x0FFF) > 0x0FFF;
+                let (result, carry) = hl.overflowing_add(hl);
+                self.set_hl(result);
+                self.set_n(false);
+                self.set_h(half_carry);
+                self.set_c(carry);
+                8
+            }
+
+            0xA8 => {
+                // XOR B
+                self.a ^= self.b;
+                self.set_flags(self.a == 0, false, false, false);
+                4
+            }
+
+            0xA9 => {
+                // XOR C
+                self.a ^= self.c;
+                self.set_flags(self.a == 0, false, false, false);
+                4
+            }
+
+            0xAA => {
+                // XOR D
+                self.a ^= self.d;
+                self.set_flags(self.a == 0, false, false, false);
+                4
+            }
+
+            0xAB => {
+                // XOR E
+                self.a ^= self.e;
+                self.set_flags(self.a == 0, false, false, false);
+                4
+            }
+
+            0xAC => {
+                // XOR H
+                self.a ^= self.h;
+                self.set_flags(self.a == 0, false, false, false);
+                4
+            }
+
+            0xAD => {
+                // XOR L
+                self.a ^= self.l;
+                self.set_flags(self.a == 0, false, false, false);
+                4
+            }
+
+            0x48 => {
+                // LD C, B
+                self.c = self.b;
+                4
+            }
+
+            0x49 => {
+                // LD C, C = NOOP
+                4
+            }
+
+            0x4A => {
+                // LD C, D
+                self.c = self.d;
+                4
+            }
+
+            0x4B => {
+                // LD C, E
+                self.c = self.e;
+                4
+            }
+
+            0x4C => {
+                // LD C, H
+                self.c = self.h;
+                4
+            }
+
+            0x4D => {
+                // LD C, L
+                self.c = self.l;
+                4
+            }
+
+            0x37 => {
+                // SCF (set carry) z unaffected
+                self.set_n(false);
+                self.set_h(false);
+                self.set_c(true);
+                4
+            }
+
+            0x3F => {
+                let old_c = self.get_c();
+                self.set_flags(self.get_z(), false, false, !old_c);
+                self.f &= 0xF0;
+                4
+            }
+
+            0x17 => {
+                // RLA
+                let new_c = (self.a & 0x80) != 0;
+                self.a = (self.a << 1) | if self.get_c() { 1 } else { 0 };
+                self.set_flags(false, false, false, new_c);
+                4
+            }
+
+            0x0F => {
+                // RRCA
+                let new_c = (self.a & 0x01) != 0;
+                self.a = self.a.rotate_right(1);
+                self.set_flags(false, false, false, new_c);
+                4
+            }
+
+            0x08 => {
+                // LD (nn), SP
+                let low = mmu.read_byte(self.pc) as u16;
+                self.pc = self.pc.wrapping_add(1);
+                let high = mmu.read_byte(self.pc) as u16;
+                self.pc = self.pc.wrapping_add(1);
+                let addr = (high << 8) | low;
+                mmu.write_byte(addr, self.sp as u8);
+                mmu.write_byte(addr.wrapping_add(1), (self.sp >> 8) as u8);
+                20
+            }
+
+            0xF9 => {
+                self.sp = self.get_hl();
+                8
+            }
+
+            0x9E => {
+                // SBC A, (HL)
+                let n = mmu.read_byte(self.get_hl());
+                let c = if self.get_c() { 1u8 } else { 0 };
+                let half_carry = (self.a & 0x0F) < (n & 0x0F) + c;
+                let sum = n as u16 + c as u16;
+                let carry = (self.a as u16) < sum;
+                self.a = self.a.wrapping_sub(n).wrapping_sub(c);
+                self.set_flags(self.a == 0, true, half_carry, carry);
+                8
+            }
+
+            0xA6 => {
+                // AND (HL)
+                self.a &= mmu.read_byte(self.get_hl());
+                self.set_flags(self.a == 0, false, true, false);
+                8
+            }
+
+            0xE8 => {
+                // ADD SP, r8
+                let imm = mmu.read_byte(self.pc) as i8 as i16;
+                self.pc = self.pc.wrapping_add(1);
+                let sp = self.sp;
+                let e = imm as u16; // wrapping two's complement
+                let half_carry = ((sp & 0x0F) + (e & 0x0F)) > 0x0F;
+                let carry = ((sp & 0xFF) + (e & 0xFF)) > 0xFF;
+                self.sp = sp.wrapping_add(e);
+                self.set_flags(false, false, half_carry, carry);
+                16
+            }
+
+            0xF8 => {
+                // LD HL, SP+r8
+                let imm = mmu.read_byte(self.pc) as i8 as i16;
+                self.pc = self.pc.wrapping_add(1);
+                let sp = self.sp;
+                let e = imm as u16;
+                let half_carry = ((sp & 0x0F) + (e & 0x0F)) > 0x0F;
+                let carry = ((sp & 0xFF) + (e & 0xFF)) > 0xFF;
+                self.set_hl(sp.wrapping_add(e));
+                self.set_flags(false, false, half_carry, carry);
+                12
+            }
+
+            0xF2 => {
+                // LD A, (C)
+                self.a = mmu.read_byte(0xFF00 | self.c as u16);
+                8
+            }
+
+            // END OF OPCODES
             _ => {
                 println!(
                     "\n[KRASCH] Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
@@ -2060,526 +2377,438 @@ impl Cpu {
 
     // Secondary instruction table for bit-manipulation (0xCB-prefix)
     fn step_cb(&mut self, opcode: u8, mmu: &mut Mmu) -> u32 {
+        fn rlc(val: u8) -> (u8, bool) {
+            let c = val & 0x80 != 0;
+            (val.rotate_left(1), c)
+        }
+        fn rrc(val: u8) -> (u8, bool) {
+            let c = val & 0x01 != 0;
+            (val.rotate_right(1), c)
+        }
+        fn rl(val: u8, old_c: bool) -> (u8, bool) {
+            let c = val & 0x80 != 0;
+            ((val << 1) | u8::from(old_c), c)
+        }
+        fn rr(val: u8, old_c: bool) -> (u8, bool) {
+            let c = val & 0x01 != 0;
+            ((val >> 1) | if old_c { 0x80 } else { 0 }, c)
+        }
+        fn sla(val: u8) -> (u8, bool) {
+            (val << 1, val & 0x80 != 0)
+        }
+        fn sra(val: u8) -> (u8, bool) {
+            ((val >> 1) | (val & 0x80), val & 0x01 != 0)
+        }
+        fn srl(val: u8) -> (u8, bool) {
+            (val >> 1, val & 0x01 != 0)
+        }
+        fn swap(val: u8) -> u8 {
+            val.rotate_left(4)
+        }
+
         match opcode {
-            0x30 => {
-                self.b = self.b.rotate_left(4);
-                self.set_flags(self.b == 0, false, false, false);
-                8
-            } // SWAP B
-            0x31 => {
-                self.c = self.c.rotate_left(4);
-                self.set_flags(self.c == 0, false, false, false);
-                8
-            } // SWAP C
-            0x32 => {
-                self.d = self.d.rotate_left(4);
-                self.set_flags(self.d == 0, false, false, false);
-                8
-            } // SWAP D
-            0x33 => {
-                self.e = self.e.rotate_left(4);
-                self.set_flags(self.e == 0, false, false, false);
-                8
-            } // SWAP E
-            0x34 => {
-                self.h = self.h.rotate_left(4);
-                self.set_flags(self.h == 0, false, false, false);
-                8
-            } // SWAP H
-            0x35 => {
-                self.l = self.l.rotate_left(4);
-                self.set_flags(self.l == 0, false, false, false);
-                8
-            } // SWAP L
-            0x36 => {
-                let addr = self.get_hl();
-                let v = mmu.read_byte(addr).rotate_left(4);
-                mmu.write_byte(addr, v);
-                self.set_flags(v == 0, false, false, false);
-                16
-            } // SWAP (HL)
+            0x00..=0x3F => {
+                let old_c = self.get_c();
+                let (result, carry, cycles) = match opcode {
+                    0x00 => {
+                        let (v, c) = rlc(self.b);
+                        self.b = v;
+                        (v, c, 8)
+                    }
+                    0x01 => {
+                        let (v, c) = rlc(self.c);
+                        self.c = v;
+                        (v, c, 8)
+                    }
+                    0x02 => {
+                        let (v, c) = rlc(self.d);
+                        self.d = v;
+                        (v, c, 8)
+                    }
+                    0x03 => {
+                        let (v, c) = rlc(self.e);
+                        self.e = v;
+                        (v, c, 8)
+                    }
+                    0x04 => {
+                        let (v, c) = rlc(self.h);
+                        self.h = v;
+                        (v, c, 8)
+                    }
+                    0x05 => {
+                        let (v, c) = rlc(self.l);
+                        self.l = v;
+                        (v, c, 8)
+                    }
+                    0x06 => {
+                        let a = self.get_hl();
+                        let (v, c) = rlc(mmu.read_byte(a));
+                        mmu.write_byte(a, v);
+                        (v, c, 16)
+                    }
+                    0x07 => {
+                        let (v, c) = rlc(self.a);
+                        self.a = v;
+                        (v, c, 8)
+                    }
 
-            0x38 => {
-                /* SRL B */
-                let c = (self.b & 1) != 0;
-                self.b >>= 1;
-                self.set_flags(self.b == 0, false, false, c);
-                8
-            }
-            0x39 => {
-                let c = (self.c & 1) != 0;
-                self.c >>= 1;
-                self.set_flags(self.c == 0, false, false, c);
-                8
-            }
-            0x3A => {
-                let c = (self.d & 1) != 0;
-                self.d >>= 1;
-                self.set_flags(self.d == 0, false, false, c);
-                8
-            }
-            0x3B => {
-                let c = (self.e & 1) != 0;
-                self.e >>= 1;
-                self.set_flags(self.e == 0, false, false, c);
-                8
-            }
-            0x3C => {
-                let c = (self.h & 1) != 0;
-                self.h >>= 1;
-                self.set_flags(self.h == 0, false, false, c);
-                8
-            }
-            0x3D => {
-                let c = (self.l & 1) != 0;
-                self.l >>= 1;
-                self.set_flags(self.l == 0, false, false, c);
-                8
-            }
-            0x3E => {
-                let addr = self.get_hl();
-                let mut v = mmu.read_byte(addr);
-                let c = (v & 1) != 0;
-                v >>= 1;
-                mmu.write_byte(addr, v);
-                self.set_flags(v == 0, false, false, c);
-                16
-            }
+                    0x08 => {
+                        let (v, c) = rrc(self.b);
+                        self.b = v;
+                        (v, c, 8)
+                    }
+                    0x09 => {
+                        let (v, c) = rrc(self.c);
+                        self.c = v;
+                        (v, c, 8)
+                    }
+                    0x0A => {
+                        let (v, c) = rrc(self.d);
+                        self.d = v;
+                        (v, c, 8)
+                    }
+                    0x0B => {
+                        let (v, c) = rrc(self.e);
+                        self.e = v;
+                        (v, c, 8)
+                    }
+                    0x0C => {
+                        let (v, c) = rrc(self.h);
+                        self.h = v;
+                        (v, c, 8)
+                    }
+                    0x0D => {
+                        let (v, c) = rrc(self.l);
+                        self.l = v;
+                        (v, c, 8)
+                    }
+                    0x0E => {
+                        let a = self.get_hl();
+                        let (v, c) = rrc(mmu.read_byte(a));
+                        mmu.write_byte(a, v);
+                        (v, c, 16)
+                    }
+                    0x0F => {
+                        let (v, c) = rrc(self.a);
+                        self.a = v;
+                        (v, c, 8)
+                    }
 
-            0x3F => {
-                // SRL A (Shift Right Logical)
-                let carry = (self.a & 0x01) != 0;
-                self.a >>= 1; // bit 7 blir 0
-                self.set_flags(self.a == 0, false, false, carry);
-                8
-            }
+                    0x10 => {
+                        let (v, c) = rl(self.b, old_c);
+                        self.b = v;
+                        (v, c, 8)
+                    }
+                    0x11 => {
+                        let (v, c) = rl(self.c, old_c);
+                        self.c = v;
+                        (v, c, 8)
+                    }
+                    0x12 => {
+                        let (v, c) = rl(self.d, old_c);
+                        self.d = v;
+                        (v, c, 8)
+                    }
+                    0x13 => {
+                        let (v, c) = rl(self.e, old_c);
+                        self.e = v;
+                        (v, c, 8)
+                    }
+                    0x14 => {
+                        let (v, c) = rl(self.h, old_c);
+                        self.h = v;
+                        (v, c, 8)
+                    }
+                    0x15 => {
+                        let (v, c) = rl(self.l, old_c);
+                        self.l = v;
+                        (v, c, 8)
+                    }
+                    0x16 => {
+                        let a = self.get_hl();
+                        let (v, c) = rl(mmu.read_byte(a), old_c);
+                        mmu.write_byte(a, v);
+                        (v, c, 16)
+                    }
+                    0x17 => {
+                        let (v, c) = rl(self.a, old_c);
+                        self.a = v;
+                        (v, c, 8)
+                    }
 
-            0x40 => {
-                let is_set = (self.b & (1 << 0)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 0, B
-            0x41 => {
-                let is_set = (self.c & (1 << 0)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 0, C
-            0x42 => {
-                let is_set = (self.d & (1 << 0)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 0, D
-            0x43 => {
-                let is_set = (self.e & (1 << 0)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 0, E
-            0x44 => {
-                let is_set = (self.h & (1 << 0)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 0, H
-            0x45 => {
-                let is_set = (self.l & (1 << 0)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 0, L
-            0x46 => {
-                let val = mmu.read_byte(self.get_hl());
-                let is_set = (val & (1 << 0)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                12
-            } // BIT 0, (HL)
-            0x47 => {
-                let is_set = (self.a & (1 << 0)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 0, A
-            0x48 => {
-                let is_set = (self.b & (1 << 1)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 1, B
-            0x49 => {
-                let is_set = (self.c & (1 << 1)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 1, C
-            0x4A => {
-                let is_set = (self.d & (1 << 1)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 1, D
-            0x4B => {
-                let is_set = (self.e & (1 << 1)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 1, E
-            0x4C => {
-                let is_set = (self.h & (1 << 1)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 1, H
-            0x4D => {
-                let is_set = (self.l & (1 << 1)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 1, L
-            0x4E => {
-                let val = mmu.read_byte(self.get_hl());
-                let is_set = (val & (1 << 1)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                12
-            } // BIT 1, (HL)
-            0x4F => {
-                let is_set = (self.a & (1 << 1)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 1, A
-            0x50 => {
-                let is_set = (self.b & (1 << 2)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 2, B
-            0x51 => {
-                let is_set = (self.c & (1 << 2)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 2, C
-            0x52 => {
-                let is_set = (self.d & (1 << 2)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 2, D
-            0x53 => {
-                let is_set = (self.e & (1 << 2)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 2, E
-            0x54 => {
-                let is_set = (self.h & (1 << 2)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 2, H
-            0x55 => {
-                let is_set = (self.l & (1 << 2)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 2, L
-            0x56 => {
-                let val = mmu.read_byte(self.get_hl());
-                let is_set = (val & (1 << 2)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                12
-            } // BIT 2, (HL)
-            0x57 => {
-                let is_set = (self.a & (1 << 2)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 2, A
-            0x58 => {
-                let is_set = (self.b & (1 << 3)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 3, B
-            0x59 => {
-                let is_set = (self.c & (1 << 3)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 3, C
-            0x5A => {
-                let is_set = (self.d & (1 << 3)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 3, D
-            0x5B => {
-                let is_set = (self.e & (1 << 3)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 3, E
-            0x5C => {
-                let is_set = (self.h & (1 << 3)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 3, H
-            0x5D => {
-                let is_set = (self.l & (1 << 3)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 3, L
-            0x5E => {
-                let val = mmu.read_byte(self.get_hl());
-                let is_set = (val & (1 << 3)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                12
-            } // BIT 3, (HL)
-            0x5F => {
-                let is_set = (self.a & (1 << 3)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 3, A
-            0x60 => {
-                let is_set = (self.b & (1 << 4)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 4, B
-            0x61 => {
-                let is_set = (self.c & (1 << 4)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 4, C
-            0x62 => {
-                let is_set = (self.d & (1 << 4)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 4, D
-            0x63 => {
-                let is_set = (self.e & (1 << 4)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 4, E
-            0x64 => {
-                let is_set = (self.h & (1 << 4)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 4, H
-            0x65 => {
-                let is_set = (self.l & (1 << 4)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 4, L
-            0x66 => {
-                let val = mmu.read_byte(self.get_hl());
-                let is_set = (val & (1 << 4)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                12
-            } // BIT 4, (HL)
-            0x67 => {
-                let is_set = (self.a & (1 << 4)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 4, A
-            0x68 => {
-                let is_set = (self.b & (1 << 5)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 5, B
-            0x69 => {
-                let is_set = (self.c & (1 << 5)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 5, C
-            0x6A => {
-                let is_set = (self.d & (1 << 5)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 5, D
-            0x6B => {
-                let is_set = (self.e & (1 << 5)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 5, E
-            0x6C => {
-                let is_set = (self.h & (1 << 5)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 5, H
-            0x6D => {
-                let is_set = (self.l & (1 << 5)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 5, L
-            0x6E => {
-                let val = mmu.read_byte(self.get_hl());
-                let is_set = (val & (1 << 5)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                12
-            } // BIT 5, (HL)
-            0x6F => {
-                let is_set = (self.a & (1 << 5)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 5, L (Samma som du frågade om sist!)
-            0x70 => {
-                let is_set = (self.b & (1 << 6)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 6, B
-            0x71 => {
-                let is_set = (self.c & (1 << 6)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 6, C
-            0x72 => {
-                let is_set = (self.d & (1 << 6)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 6, D
-            0x73 => {
-                let is_set = (self.e & (1 << 6)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 6, E
-            0x74 => {
-                let is_set = (self.h & (1 << 6)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 6, H
-            0x75 => {
-                let is_set = (self.l & (1 << 6)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 6, L
-            0x76 => {
-                let val = mmu.read_byte(self.get_hl());
-                let is_set = (val & (1 << 6)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                12
-            } // BIT 6, (HL)
-            0x77 => {
-                let is_set = (self.a & (1 << 6)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 6, A
-            0x78 => {
-                let is_set = (self.b & (1 << 7)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 7, B
-            0x79 => {
-                let is_set = (self.c & (1 << 7)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 7, C
-            0x7A => {
-                let is_set = (self.d & (1 << 7)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 7, D
-            0x7B => {
-                let is_set = (self.e & (1 << 7)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 7, E
-            0x7C => {
-                let is_set = (self.h & (1 << 7)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 7, H
-            0x7D => {
-                let is_set = (self.l & (1 << 7)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 7, L
-            0x7E => {
-                let val = mmu.read_byte(self.get_hl());
-                let is_set = (val & (1 << 7)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                12
-            } // BIT 7, (HL)
-            0x7F => {
-                let is_set = (self.a & (1 << 7)) != 0;
-                self.set_flags(!is_set, false, true, self.get_c());
-                8
-            } // BIT 7, A
+                    0x18 => {
+                        let (v, c) = rr(self.b, old_c);
+                        self.b = v;
+                        (v, c, 8)
+                    }
+                    0x19 => {
+                        let (v, c) = rr(self.c, old_c);
+                        self.c = v;
+                        (v, c, 8)
+                    }
+                    0x1A => {
+                        let (v, c) = rr(self.d, old_c);
+                        self.d = v;
+                        (v, c, 8)
+                    }
+                    0x1B => {
+                        let (v, c) = rr(self.e, old_c);
+                        self.e = v;
+                        (v, c, 8)
+                    }
+                    0x1C => {
+                        let (v, c) = rr(self.h, old_c);
+                        self.h = v;
+                        (v, c, 8)
+                    }
+                    0x1D => {
+                        let (v, c) = rr(self.l, old_c);
+                        self.l = v;
+                        (v, c, 8)
+                    }
+                    0x1E => {
+                        let a = self.get_hl();
+                        let (v, c) = rr(mmu.read_byte(a), old_c);
+                        mmu.write_byte(a, v);
+                        (v, c, 16)
+                    }
+                    0x1F => {
+                        let (v, c) = rr(self.a, old_c);
+                        self.a = v;
+                        (v, c, 8)
+                    }
 
-            0x37 => {
-                // SWAP A (Swap upper and lower nibbles of register A)
-                self.a = self.a.rotate_left(4);
+                    0x20 => {
+                        let (v, c) = sla(self.b);
+                        self.b = v;
+                        (v, c, 8)
+                    }
+                    0x21 => {
+                        let (v, c) = sla(self.c);
+                        self.c = v;
+                        (v, c, 8)
+                    }
+                    0x22 => {
+                        let (v, c) = sla(self.d);
+                        self.d = v;
+                        (v, c, 8)
+                    }
+                    0x23 => {
+                        let (v, c) = sla(self.e);
+                        self.e = v;
+                        (v, c, 8)
+                    }
+                    0x24 => {
+                        let (v, c) = sla(self.h);
+                        self.h = v;
+                        (v, c, 8)
+                    }
+                    0x25 => {
+                        let (v, c) = sla(self.l);
+                        self.l = v;
+                        (v, c, 8)
+                    }
+                    0x26 => {
+                        let a = self.get_hl();
+                        let (v, c) = sla(mmu.read_byte(a));
+                        mmu.write_byte(a, v);
+                        (v, c, 16)
+                    }
+                    0x27 => {
+                        let (v, c) = sla(self.a);
+                        self.a = v;
+                        (v, c, 8)
+                    }
 
-                // Uppdatera flaggor: Z beror på om A är 0, resten blir alltid false!
-                self.set_flags(self.a == 0, false, false, false);
-                8 // En CB-instruktion tar oftast 8 cykler internt
-            }
-            0x86 => {
-                // RES 0, (HL) (Clear bit 0 of value at memory address HL)
-                let addr = self.get_hl();
-                let val = mmu.read_byte(addr); // Ändrat till self.mmu
+                    0x28 => {
+                        let (v, c) = sra(self.b);
+                        self.b = v;
+                        (v, c, 8)
+                    }
+                    0x29 => {
+                        let (v, c) = sra(self.c);
+                        self.c = v;
+                        (v, c, 8)
+                    }
+                    0x2A => {
+                        let (v, c) = sra(self.d);
+                        self.d = v;
+                        (v, c, 8)
+                    }
+                    0x2B => {
+                        let (v, c) = sra(self.e);
+                        self.e = v;
+                        (v, c, 8)
+                    }
+                    0x2C => {
+                        let (v, c) = sra(self.h);
+                        self.h = v;
+                        (v, c, 8)
+                    }
+                    0x2D => {
+                        let (v, c) = sra(self.l);
+                        self.l = v;
+                        (v, c, 8)
+                    }
+                    0x2E => {
+                        let a = self.get_hl();
+                        let (v, c) = sra(mmu.read_byte(a));
+                        mmu.write_byte(a, v);
+                        (v, c, 16)
+                    }
+                    0x2F => {
+                        let (v, c) = sra(self.a);
+                        self.a = v;
+                        (v, c, 8)
+                    }
 
-                // Nollställ bit 0 genom att maska med alla bitar utom bit 0
-                let result = val & !(1 << 0);
+                    0x30 => {
+                        let v = swap(self.b);
+                        self.b = v;
+                        (v, false, 8)
+                    }
+                    0x31 => {
+                        let v = swap(self.c);
+                        self.c = v;
+                        (v, false, 8)
+                    }
+                    0x32 => {
+                        let v = swap(self.d);
+                        self.d = v;
+                        (v, false, 8)
+                    }
+                    0x33 => {
+                        let v = swap(self.e);
+                        self.e = v;
+                        (v, false, 8)
+                    }
+                    0x34 => {
+                        let v = swap(self.h);
+                        self.h = v;
+                        (v, false, 8)
+                    }
+                    0x35 => {
+                        let v = swap(self.l);
+                        self.l = v;
+                        (v, false, 8)
+                    }
+                    0x36 => {
+                        let a = self.get_hl();
+                        let v = swap(mmu.read_byte(a));
+                        mmu.write_byte(a, v);
+                        (v, false, 16)
+                    }
+                    0x37 => {
+                        let v = swap(self.a);
+                        self.a = v;
+                        (v, false, 8)
+                    }
 
-                mmu.write_byte(addr, result); // Ändrat till self.mmu
-                16
+                    0x38 => {
+                        let (v, c) = srl(self.b);
+                        self.b = v;
+                        (v, c, 8)
+                    }
+                    0x39 => {
+                        let (v, c) = srl(self.c);
+                        self.c = v;
+                        (v, c, 8)
+                    }
+                    0x3A => {
+                        let (v, c) = srl(self.d);
+                        self.d = v;
+                        (v, c, 8)
+                    }
+                    0x3B => {
+                        let (v, c) = srl(self.e);
+                        self.e = v;
+                        (v, c, 8)
+                    }
+                    0x3C => {
+                        let (v, c) = srl(self.h);
+                        self.h = v;
+                        (v, c, 8)
+                    }
+                    0x3D => {
+                        let (v, c) = srl(self.l);
+                        self.l = v;
+                        (v, c, 8)
+                    }
+                    0x3E => {
+                        let a = self.get_hl();
+                        let (v, c) = srl(mmu.read_byte(a));
+                        mmu.write_byte(a, v);
+                        (v, c, 16)
+                    }
+                    0x3F => {
+                        let (v, c) = srl(self.a);
+                        self.a = v;
+                        (v, c, 8)
+                    }
+                    _ => unreachable!(),
+                };
+                self.set_flags(result == 0, false, false, carry);
+                cycles
             }
 
-            0x87 => {
-                // RES 0, A (Reset bit 0 in register A)
-                self.a &= !1; // Nollställ bit 0 säkert
-                8 // Tar 8 klockcykler
-            }
-
-            0x27 => {
-                // SLA A (Shift Left Arithmetic register A)
-                let carry = (self.a & 0x80) != 0; // Kolla om högsta biten är 1
-                self.a <<= 1; // Skifta ett steg till vänster (bit 0 blir automatiskt 0)
-
-                // Uppdatera flaggorna: Z styrs av resultatet, N=false, H=false, C=carry
-                self.set_flags(self.a == 0, false, false, carry);
-                8 // Tar 8 klockcykler
-            }
-
-            0xFE => {
-                // SET 7, (HL)
-                let addr = self.get_hl();
-                let val = mmu.read_byte(addr);
-                mmu.write_byte(addr, val | (1 << 7));
-                16
+            0x40..=0x7F => {
+                let bit = 1u8 << ((opcode >> 3) & 7);
+                let val = match opcode & 7 {
+                    0 => self.b,
+                    1 => self.c,
+                    2 => self.d,
+                    3 => self.e,
+                    4 => self.h,
+                    5 => self.l,
+                    6 => mmu.read_byte(self.get_hl()),
+                    7 => self.a,
+                    _ => unreachable!(),
+                };
+                self.set_z((val & bit) == 0);
+                self.set_n(false);
+                self.set_h(true);
+                if opcode & 7 == 6 { 12 } else { 8 }
             }
 
             0x80..=0xBF => {
-                let bit = 1u8 << ((opcode >> 3) & 0x07);
-                match opcode & 0x07 {
-                    0 => {
-                        self.b &= !bit;
-                        8
-                    }
-                    1 => {
-                        self.c &= !bit;
-                        8
-                    }
-                    2 => {
-                        self.d &= !bit;
-                        8
-                    }
-                    3 => {
-                        self.e &= !bit;
-                        8
-                    }
-                    4 => {
-                        self.h &= !bit;
-                        8
-                    }
-                    5 => {
-                        self.l &= !bit;
-                        8
-                    }
+                let mask = !(1u8 << ((opcode >> 3) & 7));
+                match opcode & 7 {
+                    0 => self.b &= mask,
+                    1 => self.c &= mask,
+                    2 => self.d &= mask,
+                    3 => self.e &= mask,
+                    4 => self.h &= mask,
+                    5 => self.l &= mask,
                     6 => {
-                        let addr = self.get_hl();
-                        let val = mmu.read_byte(addr);
-                        mmu.write_byte(addr, val & !bit);
-                        16
+                        let a = self.get_hl();
+                        mmu.write_byte(a, mmu.read_byte(a) & mask);
                     }
-                    7 => {
-                        self.a &= !bit;
-                        8
-                    }
+                    7 => self.a &= mask,
                     _ => unreachable!(),
                 }
+                if opcode & 7 == 6 { 16 } else { 8 }
             }
 
-            _ => {
-                println!(
-                    "\n[KRASCH] Unknown or unimplemented CB opcode: 0x{:02X} at PC: 0x{:04X}",
-                    opcode,
-                    self.pc - 1
-                );
-                self.debug_dump();
-                0 // Returnera 0 för att stoppa emulatorn
+            0xC0..=0xFF => {
+                let bit = 1u8 << ((opcode >> 3) & 7);
+                match opcode & 7 {
+                    0 => self.b |= bit,
+                    1 => self.c |= bit,
+                    2 => self.d |= bit,
+                    3 => self.e |= bit,
+                    4 => self.h |= bit,
+                    5 => self.l |= bit,
+                    6 => {
+                        let a = self.get_hl();
+                        mmu.write_byte(a, mmu.read_byte(a) | bit);
+                    }
+                    7 => self.a |= bit,
+                    _ => unreachable!(),
+                }
+                if opcode & 7 == 6 { 16 } else { 8 }
             }
         }
     }
-
     // Print status for each register
     pub fn debug_dump(&self) {
         println!("--- CPU REGISTERS ---");

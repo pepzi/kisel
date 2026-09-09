@@ -99,12 +99,13 @@ impl Mmu {
                    println!("skriv FF85={:02X}", value);
                }
         */
-        if addr == 0xFF02 && value == 0x81 {
+        // i write_byte, efter ROM-skyddet
+        if addr == 0xFF02 && value & 0x80 != 0 {
             let c = self.memory[0xFF01] as char;
             print!("{}", c);
-            self.memory[0xFF02] = 0;
-            return;
+            let _ = std::io::Write::flush(&mut std::io::stdout());
         }
+        self.memory[addr as usize] = value;
 
         if addr == 0xFF46 {
             // OAM DMA: kopiera 160 byte från value*0x100 till 0xFE00
