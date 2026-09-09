@@ -63,66 +63,122 @@ fn run_cpu_test() {
 
     window.set_target_fps(60);
 
-    let mut instruction_count: u32 = 0;
+    // Create a cycle counter before the start of the loop
+    let mut cycle_accumulator: u32 = 0;
 
     // 3. Replace loop to keep it running as long as the window is open
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        // 4. Run an amount of instructions per frame (for example 7000) to allow the
-        //    game to do some work
-        for _ in 0..7000 {
+        let mut buttons = 0x0Fu8;
+        let mut dpad = 0x0Fu8;
+        if window.is_key_down(Key::Enter) {
+            buttons &= !0x08;
+        }
+        if window.is_key_down(Key::Tab) {
+            buttons &= !0x04;
+        }
+        if window.is_key_down(Key::Z) {
+            buttons &= !0x02;
+        }
+        if window.is_key_down(Key::X) {
+            buttons &= !0x01;
+        }
+        if window.is_key_down(Key::S) {
+            dpad &= !0x08;
+        }
+        if window.is_key_down(Key::W) {
+            dpad &= !0x04;
+        }
+        if window.is_key_down(Key::A) {
+            dpad &= !0x02;
+        }
+        if window.is_key_down(Key::D) {
+            dpad &= !0x01;
+        }
+        mmu.set_joypad(buttons, dpad);
+
+        let mut frame_cycles = 0;
+        while frame_cycles < 70224 {
             let cycles = cpu.step(&mut mmu);
 
             if cycles == 0 {
                 println!(
                     "\n[STOPP] Emulatorn stängdes av på grund av en oimplementerad instruktion."
                 );
-                std::process::exit(1); // <--- ÄNDRA HÄR: Döda processen stenhårt direkt!
+                std::process::exit(1);
             }
 
-            instruction_count = instruction_count.wrapping_add(1);
+            // Count Cycles for timing
+            frame_cycles += cycles;
+            cycle_accumulator += cycles;
 
-            if instruction_count.is_multiple_of(100) {
+            // One scanline takes exactly 456 clock cycles on a Game Boy
+            if cycle_accumulator >= 456 {
+                cycle_accumulator -= 456;
+
                 let current_ly = mmu.read_byte(0xFF44);
-                // SKärmen har 154 scanlines totalt (0-153)
+                // Increase LY safe and roll over after 154 lines
                 mmu.write_byte(0xFF44, (current_ly + 1) % 154);
             }
         }
 
+        // =================================================================
+        // HÄR FUSKAR VI IN V-BLANK PÅ ETT SÄKERT SÄTT! 🚀
+        // Vi pillar INTE på stacken eller PC, utan uppdaterar bara minnesflaggorna.
+        // =================================================================
+
+        // Bit 0 på adress 0xFF0F är hårdvarans V-Blank Interrupt-flagga
+        let current_if = mmu.read_byte(0xFF0F);
+        mmu.write_byte(0xFF0F, current_if | 0x01);
+
         // Let's draw the TETRIS-SCREEN!
         // We read directly from the Game Boy VRAM and translate to our screen.
 
-        // Define Game Boys 4 classical gray/green tones (ARGB format)
-        let colors = [0xFFFFFFFF, 0xFFB5B5B5, 0xFF6B6B6B, 0x00000000];
+        // Läs av Game Boys officiella skärmkontroll-register
+        let lcdc = mmu.read_byte(0xFF40);
 
-        for y in 0..SCREEN_HEIGHT {
-            for x in 0..SCREEN_WIDTH {
-                // Find which 8x8 block we are currently at in the background map
-                let tile_x = x / 8;
-                let tile_y = y / 8;
+        // Bit 7 in LCDC decides if the LCD screen is on.
+        // If the game has turned the screen off, we just draw a blank screen
+        let lcd_on = (lcdc & 0x80) != 0;
 
-                // The Game Boy background map starts at memory address 0x9800
-                let map_addr = (0x9800 + (tile_y * 32) + tile_x) as u16;
-                let tile_id = mmu.read_byte(map_addr) as u16;
+        if !lcd_on {
+            // Screen is off - make entire buffer blank/white
+            for pixel in buffer.iter_mut() {
+                *pixel = 0xFF8BAC0F;
+            }
+        } else {
+            // Define Game Boys 4 classical gray/green tones (ARGB format)
+            let colors = [0xFFFFFFFF, 0xFFB5B5B5, 0xFF6B6B6B, 0x00000000];
 
-                // Calculate exactly where in the pixel data block to read (each row is 2 bytes)
-                let pixel_x = x % 8;
-                let pixel_y = y % 8;
+            for y in 0..SCREEN_HEIGHT {
+                for x in 0..SCREEN_WIDTH {
+                    // Find which 8x8 block we are currently at in the background map
+                    let tile_x = x / 8;
+                    let tile_y = y / 8;
 
-                // Graphics data start address in VRAM (0x8000)
-                let tile_data_addr = 0x8000 + (tile_id * 16) + (pixel_y as u16 * 2);
+                    // The Game Boy background map starts at memory address 0x9800
+                    let map_addr = (0x9800 + (tile_y * 32) + tile_x) as u16;
+                    let tile_id = mmu.read_byte(map_addr) as u16;
 
-                // Game Boy stores colors in a smart "2bpp" format (2 bits per pixel)
-                let byte1 = mmu.read_byte(tile_data_addr);
-                let byte2 = mmu.read_byte(tile_data_addr + 1);
+                    // Calculate exactly where in the pixel data block to read (each row is 2 bytes)
+                    let pixel_x = x % 8;
+                    let pixel_y = y % 8;
 
-                // Fetch the two bits for this specific pixel
-                let bit_index = 7 - pixel_x;
-                let color_bit1 = (byte1 >> bit_index) & 1;
-                let color_bit2 = (byte2 >> bit_index) & 1;
-                let color_id = (color_bit2 << 1) | color_bit1;
+                    // Graphics data start address in VRAM (0x8000)
+                    let tile_data_addr = 0x8000 + (tile_id * 16) + (pixel_y as u16 * 2);
 
-                // Store correct pixel color in our minifb framebuffer
-                buffer[y * SCREEN_WIDTH + x] = colors[color_id as usize];
+                    // Game Boy stores colors in a smart "2bpp" format (2 bits per pixel)
+                    let byte1 = mmu.read_byte(tile_data_addr);
+                    let byte2 = mmu.read_byte(tile_data_addr + 1);
+
+                    // Fetch the two bits for this specific pixel
+                    let bit_index = 7 - pixel_x;
+                    let color_bit1 = (byte1 >> bit_index) & 1;
+                    let color_bit2 = (byte2 >> bit_index) & 1;
+                    let color_id = (color_bit2 << 1) | color_bit1;
+
+                    // Store correct pixel color in our minifb framebuffer
+                    buffer[y * SCREEN_WIDTH + x] = colors[color_id as usize];
+                }
             }
         }
 
