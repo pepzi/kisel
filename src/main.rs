@@ -96,7 +96,7 @@ fn run_cpu_test(rom_path: &str) {
         let mut frame_cycles = 0;
         while frame_cycles < 70224 {
             let cycles = cpu.step(&mut mmu);
-            mmu.tick_div(cycles);
+            mmu.tick(cycles);
 
             if cycles == 0 {
                 println!(
