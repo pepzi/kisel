@@ -10,6 +10,8 @@ pub struct Mmu {
     pub div_cycles: u32,
     tima_counter: u32,
     line_cycles: u32,
+    pub scx_line: [u8; 144],
+    pub scy_line: [u8; 144],
 }
 
 impl Mmu {
@@ -23,6 +25,8 @@ impl Mmu {
             div_cycles: 0,
             tima_counter: 0,
             line_cycles: 0,
+            scx_line: [0; 144],
+            scy_line: [0; 144],
         }
     }
 
@@ -58,18 +62,6 @@ impl Mmu {
         report("Up", old.1 & 0x04 != 0, dpad & 0x04 != 0);
         report("Left", old.1 & 0x02 != 0, dpad & 0x02 != 0);
         report("Right", old.1 & 0x01 != 0, dpad & 0x01 != 0);
-
-        if old.0 & 0x08 != 0 && buttons & 0x08 == 0 {
-            println!(
-                "Start IE={:02X} IF={:02X} LCDC={:02X} STAT={:02X} LY={:02X} bank={}",
-                self.memory[0xFFFF],
-                self.memory[0xFF0F],
-                self.memory[0xFF40],
-                self.memory[0xFF41],
-                self.memory[0xFF44],
-                self.rom_bank
-            );
-        }
     }
 
     pub fn read_byte(&self, addr: u16) -> u8 {
@@ -110,7 +102,12 @@ impl Mmu {
         self.line_cycles += cycles;
         while self.line_cycles >= 456 {
             self.line_cycles -= 456;
-            let mut ly = self.memory[0xFF44].wrapping_add(1);
+            let ly = self.memory[0xFF44];
+            if ly < 144 {
+                self.scx_line[ly as usize] = self.memory[0xFF43];
+                self.scy_line[ly as usize] = self.memory[0xFF42];
+            }
+            let mut ly = ly.wrapping_add(1);
             if ly >= 154 {
                 ly = 0;
             }

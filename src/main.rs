@@ -158,11 +158,14 @@ fn draw_layer(mmu: &Mmu, buffer: &mut [u32], colors: &[u32; 4], window: bool) {
 
     for y in 0..SCREEN_HEIGHT as i32 {
         for x in 0..SCREEN_WIDTH as i32 {
-            let lx = x - ox;
-            let ly = y - oy;
-            if window && (lx < 0 || ly < 0) {
-                continue;
-            }
+            let (lx, ly) = if window {
+                (x - ox, y - oy)
+            } else {
+                (
+                    x + mmu.scx_line[y as usize] as i32,
+                    y + mmu.scy_line[y as usize] as i32,
+                )
+            };
             let px = ((lx as u32) % 256) as u16;
             let py = ((ly as u32) % 256) as u16;
             let tile_id = mmu.read_byte(map_base + (py / 8) * 32 + (px / 8));
