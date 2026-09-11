@@ -3,22 +3,26 @@ use std::fs;
 
 pub struct Mmu {
     memory: [u8; 65536],
-    /// bit3=Start bit2=Select bit1=B bit0=A  (0 = nedtryckt)
+    rom: Vec<u8>,
+    rom_bank: usize,
     buttons: u8,
-    /// bit3=Down bit2=Up bit1=Left bit0=Right
     dpad: u8,
     pub div_cycles: u32,
     tima_counter: u32,
+    line_cycles: u32,
 }
 
 impl Mmu {
     pub fn new() -> Self {
         Self {
             memory: [0; 65536],
+            rom: Vec::new(),
+            rom_bank: 1,
             buttons: 0x0F,
             dpad: 0x0F,
             div_cycles: 0,
             tima_counter: 0,
+            line_cycles: 0,
         }
     }
 
@@ -31,6 +35,11 @@ impl Mmu {
         self.dpad = dpad;
         if (buttons, dpad) == old {
             return;
+        }
+
+        let pressed_now = (old.0 & !buttons) | (old.1 & !dpad);
+        if pressed_now & 0x0F != 0 {
+            self.memory[0xFF0F] |= 0x10;
         }
 
         fn report(name: &str, old_bit: bool, new_bit: bool) {
@@ -49,24 +58,124 @@ impl Mmu {
         report("Up", old.1 & 0x04 != 0, dpad & 0x04 != 0);
         report("Left", old.1 & 0x02 != 0, dpad & 0x02 != 0);
         report("Right", old.1 & 0x01 != 0, dpad & 0x01 != 0);
+
+        if old.0 & 0x08 != 0 && buttons & 0x08 == 0 {
+            println!(
+                "Start IE={:02X} IF={:02X} LCDC={:02X} STAT={:02X} LY={:02X} bank={}",
+                self.memory[0xFFFF],
+                self.memory[0xFF0F],
+                self.memory[0xFF40],
+                self.memory[0xFF41],
+                self.memory[0xFF44],
+                self.rom_bank
+            );
+        }
     }
 
     pub fn read_byte(&self, addr: u16) -> u8 {
-        if addr == 0xFF00 {
-            let select = self.memory[0xFF00];
-            let mut lo = 0x0F;
-            if select & 0x20 == 0 {
-                lo &= self.buttons;
+        match addr {
+            0x0000..=0x3FFF => *self.rom.get(addr as usize).unwrap_or(&0xFF),
+            0x4000..=0x7FFF => {
+                let off = self.rom_bank * 0x4000 + (addr as usize - 0x4000);
+                *self.rom.get(off).unwrap_or(&0xFF)
             }
-            if select & 0x10 == 0 {
-                lo &= self.dpad;
+            0xFF00 => {
+                let select = self.memory[0xFF00];
+                let mut lo = 0x0F;
+                if select & 0x20 == 0 {
+                    lo &= self.buttons;
+                }
+                if select & 0x10 == 0 {
+                    lo &= self.dpad;
+                }
+                0xC0 | (select & 0x30) | lo
             }
-            return 0xC0 | (select & 0x30) | lo;
+            _ => self.memory[addr as usize],
         }
-        self.memory[addr as usize]
+    }
+
+    pub fn write_ly(&mut self, v: u8) {
+        self.memory[0xFF44] = v;
+    }
+
+    pub fn or_if(&mut self, bits: u8) {
+        self.memory[0xFF0F] |= bits;
+    }
+
+    pub fn ppu_step(&mut self, cycles: u32) {
+        if self.memory[0xFF40] & 0x80 == 0 {
+            return;
+        }
+
+        self.line_cycles += cycles;
+        while self.line_cycles >= 456 {
+            self.line_cycles -= 456;
+            let mut ly = self.memory[0xFF44].wrapping_add(1);
+            if ly >= 154 {
+                ly = 0;
+            }
+            self.memory[0xFF44] = ly;
+            if ly == 144 {
+                self.memory[0xFF0F] |= 0x01;
+            }
+        }
+
+        let ly = self.memory[0xFF44];
+        let lyc = self.memory[0xFF45];
+        let mut stat = self.memory[0xFF41] & 0xF8;
+        let mode = if ly >= 144 {
+            1u8
+        } else if self.line_cycles < 80 {
+            2
+        } else if self.line_cycles < 80 + 172 {
+            3
+        } else {
+            0
+        };
+        let old_mode = self.memory[0xFF41] & 0x03;
+        stat |= mode;
+        if ly == lyc {
+            stat |= 0x04;
+        }
+        self.memory[0xFF41] = stat;
+
+        if ly == lyc && stat & 0x40 != 0 {
+            self.memory[0xFF0F] |= 0x02;
+        }
+        if mode != old_mode {
+            if mode == 0 && stat & 0x08 != 0 {
+                self.memory[0xFF0F] |= 0x02;
+            }
+            if mode == 1 && stat & 0x10 != 0 {
+                self.memory[0xFF0F] |= 0x02;
+            }
+            if mode == 2 && stat & 0x20 != 0 {
+                self.memory[0xFF0F] |= 0x02;
+            }
+        }
     }
 
     pub fn write_byte(&mut self, addr: u16, value: u8) {
+        if addr == 0xFF44 {
+            return;
+        }
+
+        if addr == 0xFF41 {
+            let old = self.memory[0xFF41];
+            self.memory[0xFF41] = (value & 0x78) | (old & 0x07);
+            return;
+        }
+
+        if (0x2000..=0x3FFF).contains(&addr) {
+            let banks = (self.rom.len() / 0x4000).max(1);
+            let mut bank = (value as usize) & 0x1F;
+            if bank == 0 {
+                bank = 1;
+            }
+            self.rom_bank = bank % banks;
+            return;
+        }
+
         if addr < 0x8000 {
             return;
         }
@@ -91,7 +200,8 @@ impl Mmu {
         if addr == 0xFF46 {
             let src = (value as u16) << 8;
             for i in 0..160u16 {
-                self.memory[0xFE00 + i as usize] = self.memory[(src + i) as usize];
+                let b = self.read_byte(src + i);
+                self.memory[0xFE00 + i as usize] = b;
             }
             self.memory[0xFF46] = value;
             return;
@@ -133,9 +243,11 @@ impl Mmu {
     pub fn load_rom(&mut self, path: &str) {
         match fs::read(path) {
             Ok(bytes) => {
-                let size = bytes.len().min(self.memory.len());
-                self.memory[..size].copy_from_slice(&bytes[..size]);
                 println!("Successfully loaded ROM: {} ({} bytes)", path, bytes.len());
+                self.rom = bytes;
+                self.rom_bank = 1;
+                let n = self.rom.len().min(0x8000);
+                self.memory[..n].copy_from_slice(&self.rom[..n]);
             }
             Err(e) => panic!("Unable to load ROM '{}': {}", path, e),
         }

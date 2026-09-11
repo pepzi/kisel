@@ -25,6 +25,7 @@ pub struct Cpu {
 
     pub ime: bool, // Interrupt Master Enable
     pub last_rom_pc: u16,
+    pub halted: bool,
 }
 
 impl Cpu {
@@ -42,6 +43,7 @@ impl Cpu {
             sp: 0xFFFE,
             ime: false,
             last_rom_pc: 0x0100,
+            halted: false,
         }
     }
 
@@ -150,6 +152,14 @@ impl Cpu {
     }
     // Run one instruction and return how many clock cycles it took
     pub fn step(&mut self, mmu: &mut Mmu) -> u32 {
+        if self.halted {
+            let pending = mmu.read_byte(0xFFFF) & mmu.read_byte(0xFF0F) & 0x1F;
+            if pending == 0 {
+                return 4;
+            }
+            self.halted = false;
+        }
+
         if self.ime {
             let ie = mmu.read_byte(0xFFFF);
             let iflag = mmu.read_byte(0xFF0F);
@@ -2059,10 +2069,7 @@ impl Cpu {
             }
 
             0x76 => {
-                // HALT: vakna när IE & IF & 0x1F != 0
-                if (mmu.read_byte(0xFFFF) & mmu.read_byte(0xFF0F) & 0x1F) == 0 {
-                    self.pc = self.pc.wrapping_sub(1); // kör HALT igen nästa step
-                }
+                self.halted = true;
                 4
             }
 
@@ -2360,6 +2367,12 @@ impl Cpu {
                 // LD A, (C)
                 self.a = mmu.read_byte(0xFF00 | self.c as u16);
                 8
+            }
+
+            0x10 => {
+                // STOP
+                self.pc = self.pc.wrapping_add(1);
+                4
             }
 
             // END OF OPCODES
