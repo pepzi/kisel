@@ -26,12 +26,20 @@ The Game Boy CPU passes [Blargg `cpu_instrs`](https://github.com/retrio/gb-test-
 - A legal ROM you own
 - [minifb](https://crates.io/crates/minifb) for the window (pulled in by Cargo)
 
+## Install
+
+```bash
+cargo install kisel
+kisel game.gb
+```
+
 ## Build and run
 
 ```bash
-cargo run --release -- tetris.gb
-cargo run --release -- "Super Mario Land (World).gb"
-cargo run --release -- noise          # sanity-check window only
+git clone https://github.com/pepzi/kisel
+cd kisel
+cargo run --release -- game.gb
+cargo run --release -- noise
 ```
 
 First argument is the ROM path. Type is picked from the extension (`.gb` / `.gbc`). Escape quits.
