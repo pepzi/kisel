@@ -27,7 +27,7 @@ fn main() {
         }
         _ => {
             eprintln!("Okänd ROM-typ ({ext}): {rom}");
-            eprintln!("Använd: emul8 <fil.gb|fil.nes>");
+            eprintln!("Använd: kisel <fil.gb|fil.nes>");
         }
     }
 }

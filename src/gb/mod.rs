@@ -18,7 +18,7 @@ pub fn run(rom_path: &str) {
 
     let mut buffer: Vec<u32> = vec![0; SCREEN_WIDTH * SCREEN_HEIGHT];
     let mut window = Window::new(
-        "emul8 — Game Boy",
+        "kisel — Game Boy",
         SCREEN_WIDTH,
         SCREEN_HEIGHT,
         WindowOptions {
@@ -183,7 +183,7 @@ fn draw_sprites(mmu: &Mmu, buffer: &mut [u32], colors: &[u32; 4], lcdc: u8) {
 pub fn run_graphic_noise() {
     let mut buffer: Vec<u32> = vec![0; SCREEN_WIDTH * SCREEN_HEIGHT];
     let mut window = Window::new(
-        "emul8 — noise",
+        "kisel — noise",
         SCREEN_WIDTH,
         SCREEN_HEIGHT,
         WindowOptions {
