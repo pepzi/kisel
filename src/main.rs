@@ -37,6 +37,7 @@ fn run_cpu_test(rom_path: &str) {
     let mut cpu = Cpu::new();
 
     mmu.load_rom(rom_path);
+    mmu.init_after_boot();
     println!("Starting executing from 0x0100 with graphical output...");
 
     let mut buffer: Vec<u32> = vec![0; SCREEN_WIDTH * SCREEN_HEIGHT];
@@ -81,6 +82,53 @@ fn run_cpu_test(rom_path: &str) {
             dpad &= !0x01;
         }
         mmu.set_joypad(buttons, dpad);
+
+        if window.is_key_pressed(Key::P, minifb::KeyRepeat::No) {
+            println!(
+                "LCDC={:02X} LY={} SCX={} SCY={} WX={} WY={} BGP={:02X} LCDCbits WIN={} BGMAP={} TILES={}",
+                mmu.read_byte(0xFF40),
+                mmu.read_byte(0xFF44),
+                mmu.read_byte(0xFF43),
+                mmu.read_byte(0xFF42),
+                mmu.read_byte(0xFF4B),
+                mmu.read_byte(0xFF4A),
+                mmu.read_byte(0xFF47),
+                mmu.read_byte(0xFF40) & 0x20 != 0,
+                if mmu.read_byte(0xFF40) & 0x08 != 0 {
+                    "9C00"
+                } else {
+                    "9800"
+                },
+                if mmu.read_byte(0xFF40) & 0x10 != 0 {
+                    "8000"
+                } else {
+                    "8800"
+                },
+            );
+            print!("map9800:");
+            for i in 0..20u16 {
+                print!(" {:02X}", mmu.read_byte(0x9800 + i));
+            }
+            println!();
+            print!("map+A0:");
+            for i in 0..20u16 {
+                print!(" {:02X}", mmu.read_byte(0x9800 + 0xA0 + i));
+            }
+            println!();
+            print!("tile28:");
+            for i in 0..16u16 {
+                print!(" {:02X}", mmu.read_byte(0x9000 + 0x28 * 16 + i));
+            }
+            println!();
+            println!(
+                "P1={:02X} FF80={:02X} FF81={:02X} FF82={:02X} FF83={:02X}",
+                mmu.read_byte(0xFF00),
+                mmu.read_byte(0xFF80),
+                mmu.read_byte(0xFF81),
+                mmu.read_byte(0xFF82),
+                mmu.read_byte(0xFF83),
+            );
+        }
 
         let mut frame_cycles = 0;
         while frame_cycles < 70224 {
@@ -135,7 +183,7 @@ fn tile_addr(_mmu: &Mmu, lcdc: u8, tile_id: u8, row: u8) -> u16 {
     let base = if lcdc & 0x10 != 0 {
         0x8000u16 + tile_id as u16 * 16
     } else {
-        (0x9000i32 + tile_id as i8 as i32 * 16) as u16
+        (0x9000i32 + (tile_id as i8 as i32) * 16) as u16
     };
     base + row as u16 * 2
 }
@@ -235,6 +283,7 @@ fn run_graphic_noise() {
             let rand_val = rand_brightness();
             *pixel = (255 << 24) | (rand_val << 16) | (rand_val << 8) | rand_val;
         }
+
         window
             .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
             .unwrap();

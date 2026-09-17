@@ -80,7 +80,14 @@ impl Mmu {
                 if select & 0x10 == 0 {
                     lo &= self.dpad;
                 }
-                0xC0 | (select & 0x30) | lo
+                let result = 0xC0 | (select & 0x30) | lo;
+                if self.dpad != 0x0F || self.buttons != 0x0F {
+                    println!(
+                        "P1rd sel={:02X} -> {:02X} (btn={:02X} dpad={:02X})",
+                        select, result, self.buttons, self.dpad
+                    );
+                }
+                result
             }
             _ => self.memory[addr as usize],
         }
@@ -189,11 +196,12 @@ impl Mmu {
         }
 
         if addr == 0xFF02 && value & 0x80 != 0 {
-            let c = self.memory[0xFF01] as char;
-            print!("{}", c);
-            let _ = std::io::Write::flush(&mut std::io::stdout());
+            let c = self.memory[0xFF01];
+            if c.is_ascii_graphic() || c == b'\n' {
+                print!("{}", c as char);
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+            }
         }
-
         if addr == 0xFF46 {
             let src = (value as u16) << 8;
             for i in 0..160u16 {
@@ -235,6 +243,20 @@ impl Mmu {
                 self.memory[0xFF05] = tima;
             }
         }
+    }
+
+    pub fn init_after_boot(&mut self) {
+        self.memory[0xFF40] = 0x91; // LCD på, BG på, $8000 tiles, $9800 map
+        self.memory[0xFF41] = 0x85;
+        self.memory[0xFF42] = 0x00;
+        self.memory[0xFF43] = 0x00;
+        self.memory[0xFF45] = 0x00;
+        self.memory[0xFF47] = 0xFC; // BGP
+        self.memory[0xFF48] = 0xFF;
+        self.memory[0xFF49] = 0xFF;
+        self.memory[0xFF4A] = 0x00;
+        self.memory[0xFF4B] = 0x00;
+        self.memory[0xFF0F] = 0xE1;
     }
 
     pub fn load_rom(&mut self, path: &str) {
