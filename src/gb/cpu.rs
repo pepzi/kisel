@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use std::println;
 
-use crate::mmu::Mmu;
+use crate::gb::mmu::Mmu;
 
 const Z_FLAG: u8 = 0b1000_0000; // Bit 7
 const N_FLAG: u8 = 0b0100_0000; // Bit 6

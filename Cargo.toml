@@ -1,7 +1,14 @@
 [package]
-name = "gbemu"
+name = "kisel"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+authors = ["pepzi"]
+description = "Multi-system 8-bit emulator (Game Boy first)"
+repository = "https://github.com/pepzi/kisel"
+readme = "README.md"
+keywords = ["emulator", "gameboy", "nes"]
+categories = ["emulators"]
 
 [dependencies]
 minifb = "0.28"

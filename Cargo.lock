@@ -178,13 +178,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gbemu"
-version = "0.1.0"
-dependencies = [
- "minifb",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -222,6 +215,13 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "kisel"
+version = "0.1.0"
+dependencies = [
+ "minifb",
 ]
 
 [[package]]
