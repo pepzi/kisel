@@ -6,7 +6,11 @@ use std::path::Path;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let rom = args.get(1).map(|s| s.as_str()).unwrap_or("tetris.gb");
+    let Some(rom) = args.get(1).map(|s| s.as_str()) else {
+        eprintln!("Usage: kisel <rom.gb|rom.nes>");
+        eprintln!("            kisel noise");
+        std::process::exit(1);
+    };
 
     if rom == "noise" {
         gb::run_graphic_noise();

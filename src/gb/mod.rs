@@ -62,7 +62,7 @@ pub fn run(rom_path: &str) {
         while frame_cycles < 70224 {
             let cycles = cpu.step(&mut mmu);
             if cycles == 0 {
-                println!("\n[STOPP] oimplementerad GB-opcode.");
+                println!("\n[STOPP] unimplemented GameBoy opcode.");
                 std::process::exit(1);
             }
             mmu.tick(cycles);

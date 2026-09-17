@@ -48,9 +48,9 @@ impl Mmu {
 
         fn report(name: &str, old_bit: bool, new_bit: bool) {
             if old_bit && !new_bit {
-                println!("{name} nedtryckt");
+                println!("{name} pressed");
             } else if !old_bit && new_bit {
-                println!("{name} släppt");
+                println!("{name} released");
             }
         }
 

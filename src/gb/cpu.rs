@@ -182,14 +182,6 @@ impl Cpu {
 
                 let ret = self.pc;
 
-                /*                 if addr == 0x0040 {
-                                   println!(
-                                       "IRQ VBlank PC_in={:04X} FF85={:02X}",
-                                       ret,
-                                       mmu.read_byte(0xFF85)
-                                   );
-                               }
-                */
                 self.sp = self.sp.wrapping_sub(1);
                 mmu.write_byte(self.sp, (ret >> 8) as u8);
                 self.sp = self.sp.wrapping_sub(1);
@@ -201,7 +193,7 @@ impl Cpu {
 
         if (0x8000..0xC000).contains(&self.pc) {
             println!(
-                "[PC I VRAM/CART] PC={:04X} från {:04X} SP={:04X} HL={:04X} FFC0={:02X} FFCD={:02X} FFE1={:02X}",
+                "[PC IN VRAM/CART] PC={:04X} from {:04X} SP={:04X} HL={:04X} FFC0={:02X} FFCD={:02X} FFE1={:02X}",
                 self.pc,
                 self.last_rom_pc,
                 self.sp,
@@ -286,19 +278,16 @@ impl Cpu {
                 let hl = self.get_hl();
                 let bc = self.get_bc();
 
-                // Räkna ut 16-bitars Half-Carry (overflow vid bit 11)
                 let half_carry = ((hl & 0x0FFF) + (bc & 0x0FFF)) > 0x0FFF;
 
-                // Utför additionen säkert och fånga Carry (overflow vid bit 15)
                 let (result, carry) = hl.overflowing_add(bc);
                 self.set_hl(result);
 
-                // Uppdatera flaggorna: Z lämnas orörd, N=false, H och C styrs av beräkningen!
                 self.set_n(false);
                 self.set_h(half_carry);
                 self.set_c(carry);
 
-                8 // Tar 8 klockcykler på den interna 16-bitarsbussen
+                8
             }
 
             0x19 => {
@@ -306,19 +295,16 @@ impl Cpu {
                 let hl = self.get_hl();
                 let de = self.get_de();
 
-                // Räkna ut 16-bitars Half-Carry (overflow vid bit 11)
                 let half_carry = ((hl & 0x0FFF) + (de & 0x0FFF)) > 0x0FFF;
 
-                // Utför additionen säkert och fånga Carry (overflow vid bit 15)
                 let (result, carry) = hl.overflowing_add(de);
                 self.set_hl(result);
 
-                // Uppdatera flaggorna: Z lämnas orörd, N=false, H och C styrs av beräkningen!
                 self.set_n(false);
                 self.set_h(half_carry);
                 self.set_c(carry);
 
-                8 // Tar 8 klockcykler på den interna 16-bitarsbussen
+                8
             }
 
             0x46 => {
@@ -520,17 +506,6 @@ impl Cpu {
 
             0xE9 => {
                 let hl = self.get_hl();
-                /*                 if hl >= 0x8000 {
-                    println!(
-                        "JP (HL) HL={:04X} A={:02X} från {:04X} FFC0={:02X} FFCD={:02X} FFE1={:02X}",
-                        hl,
-                        self.a,
-                        self.pc.wrapping_sub(1),
-                        mmu.read_byte(0xFFC0),
-                        mmu.read_byte(0xFFCD),
-                        mmu.read_byte(0xFFE1)
-                    );
-                } */
                 if self.pc.wrapping_sub(1) < 0x8000 {
                     self.last_rom_pc = self.pc.wrapping_sub(1);
                 }
@@ -573,7 +548,6 @@ impl Cpu {
 
                 mmu.write_byte(addr, result);
 
-                // Flaggor: C-flaggan skickas med orörd via t.ex. self.get_c()
                 let half_carry = (val & 0x0F) == 0x0F;
                 self.set_flags(result == 0, false, half_carry, self.get_c());
 
@@ -585,7 +559,6 @@ impl Cpu {
                 let offset = mmu.read_byte(self.pc) as i8;
                 self.pc += 1;
 
-                // Jump around!
                 self.pc = (self.pc as i32).wrapping_add(offset as i32) as u16;
                 12
             }
@@ -600,7 +573,7 @@ impl Cpu {
 
                 let d16 = (high << 8) | low;
                 self.set_bc(d16);
-                12 // uses 12 cycles
+                12
             }
             0x11 => {
                 // LD DE, d16 (Load 16-bit immediate value into DE pair)
@@ -610,8 +583,8 @@ impl Cpu {
                 self.pc += 1;
 
                 let d16 = (high << 8) | low;
-                self.set_de(d16); // Använd din fina 16-bitarsmetod!
-                12 // Tar 12 klockcykler
+                self.set_de(d16);
+                12
             }
             0x12 => {
                 let addr = self.get_de();
@@ -633,7 +606,7 @@ impl Cpu {
                 let addr = self.get_de();
                 let value = mmu.read_byte(addr);
                 self.a = value;
-                8 // Tar 8 klockcykler
+                8
             }
 
             0x0A => {
@@ -641,7 +614,7 @@ impl Cpu {
                 let addr = self.get_bc(); // Fetch next address from BC pair
                 let value = mmu.read_byte(addr); // Read from memory at that address
                 self.a = value; // store in A
-                8 // Uses 8 clock cycles
+                8
             }
 
             0xC3 => {
@@ -652,8 +625,8 @@ impl Cpu {
                 self.pc += 1;
 
                 let nn = (high << 8) | low;
-                self.pc = nn; // Change PC to new address!
-                16 // uses 16 cloc cycles
+                self.pc = nn;
+                16
             }
 
             0xAF => {
@@ -714,18 +687,16 @@ impl Cpu {
                 let addr = self.get_hl();
                 let current_val = mmu.read_byte(addr);
 
-                // Kolla Half-Carry innan subtraktion
                 let half_carry = (current_val & 0x0F) == 0x00;
 
                 let new_val = current_val.wrapping_sub(1);
                 mmu.write_byte(addr, new_val);
 
-                // Uppdatera flaggorna: Z styrs av nya värdet, N=true, H, C lämnas orörd
                 self.set_z(new_val == 0);
                 self.set_n(true);
                 self.set_h(half_carry);
 
-                12 // Sätter vi till 12 cykler så matchar det Game Boys standard-timing perfekt!
+                12
             }
 
             0x21 => {
@@ -766,16 +737,14 @@ impl Cpu {
                 // RLCA (Rotate register A left. Old bit 7 to Carry and to bit 0)
                 let carry = (self.a & 0x80) != 0; // Hämta bit 7
 
-                // Rotera ett steg till vänster och lägg till gamla bit 7 på bit 0:s plats
                 self.a = (self.a << 1) | (if carry { 1 } else { 0 });
 
-                // Z svingas alltid till false på Game Boy för denna instruktion!
                 self.set_flags(false, false, false, carry);
                 4
             }
 
             0x0D => {
-                // DEC C — yttre loopen
+                // DEC C
                 let old = self.c;
                 self.c = old.wrapping_sub(1);
                 self.set_flags(self.c == 0, true, (old & 0x0F) == 0, self.get_c());
@@ -816,7 +785,7 @@ impl Cpu {
                 8
             }
             0x2B => {
-                // DEC HL (Decrement HL register pair - Denna har du redan, men bra för blocket)
+                // DEC HL
                 let hl = self.get_hl();
                 self.set_hl(hl.wrapping_sub(1));
                 8
@@ -1011,9 +980,6 @@ impl Cpu {
 
             0x22 => {
                 let addr = self.get_hl();
-                /*                 if (0xC000..0xC0A0).contains(&addr) || (0x2B00..0x2C00).contains(&addr) {
-                    println!("LDI (HL)={:04X} A={:02X}", addr, self.a);
-                } */
                 mmu.write_byte(addr, self.a);
                 self.set_hl(addr.wrapping_add(1));
                 8
@@ -1025,9 +991,6 @@ impl Cpu {
                 8 // 8 cycles
             }
 
-            // ==========================================
-            // SUB-REGISTERSFAMILJEN (SUB r)
-            // ==========================================
             0x90 => {
                 // SUB B
                 let half_carry = (self.a & 0x0F) < (self.b & 0x0F);
@@ -1080,8 +1043,6 @@ impl Cpu {
                 // SUB A (Subtract register A from itself - always results in 0)
                 self.a = 0;
 
-                // Flaggor: Z=true (eftersom A=0), N=true (det var en subtraktion), H=false,
-                // C=false
                 self.set_flags(true, true, false, false);
                 4
             }
@@ -1105,11 +1066,8 @@ impl Cpu {
                 self.pc = self.pc.wrapping_add(1);
                 let carry_val = if self.get_c() { 1 } else { 0 };
 
-                // Beräkna Half-Carry (bit 4) med hänsyn till carry
                 let half_carry = (self.a & 0x0F) < (val & 0x0F) + carry_val;
 
-                // Utför subtraktionen i två steg för att fånga Carry korrekt via
-                // overflowing_sub
                 let (res1, carry1) = self.a.overflowing_sub(val);
                 let (final_res, carry2) = res1.overflowing_sub(carry_val);
                 self.a = final_res;
@@ -1180,11 +1138,6 @@ impl Cpu {
                 self.pc = self.pc.wrapping_add(1);
                 let nn = (high << 8) | low;
 
-                /*                 let call_addr = self.pc.wrapping_sub(3);
-                               if (0x0170..0x01E0).contains(&call_addr) {
-                                   println!("VBlank CALL {:04X} från {:04X}", nn, call_addr);
-                               }
-                */
                 let ret = self.pc;
                 self.sp = self.sp.wrapping_sub(1);
                 mmu.write_byte(self.sp, (ret >> 8) as u8);
@@ -1330,7 +1283,6 @@ impl Cpu {
 
                 let return_addr = (high << 8) | low;
 
-                // Set PC to address to return to
                 self.pc = return_addr;
                 16 // uses 16 cycles
             }
@@ -1508,7 +1460,6 @@ impl Cpu {
                 let cb_opcode = mmu.read_byte(self.pc);
                 self.pc += 1;
 
-                // Let's call our new method (returning it's cycles +4 for the 0xCB search)
                 self.step_cb(cb_opcode, mmu) + 4
             }
 
@@ -1764,20 +1715,16 @@ impl Cpu {
             }
 
             0xF1 => {
-                // POP AF (Viktigt: Uppdaterar flaggregistret F!)
+                // POP AF
                 let f_value = mmu.read_byte(self.sp);
                 self.sp = self.sp.wrapping_add(1);
                 self.a = mmu.read_byte(self.sp);
                 self.sp = self.sp.wrapping_add(1);
 
-                // Maskera bort de 4 lägsta bitarna i F, de är alltid 0 på riktig hårdvara
                 self.f = f_value & 0xF0;
                 12
             }
 
-            // ==========================================
-            // SBC A, r FAMILJEN (Subtract with Carry) - 4 CYKLER VAR
-            // ==========================================
             0x98 => {
                 // SBC A, B
                 let carry_val = if self.get_c() { 1 } else { 0 };
@@ -1847,9 +1794,6 @@ impl Cpu {
                 4
             }
 
-            // ==========================================
-            // LD B, r FAMILJEN (Kopiera register till B) - 4 CYKLER VAR
-            // ==========================================
             0x40 => {
                 // LD B, B
                 //self.b = self.b;
@@ -1930,7 +1874,7 @@ impl Cpu {
                 8
             }
             0xB7 => {
-                // OR A, A (Bitwise OR register A with itself - Sätter bara flaggor)
+                // OR A, A (Bitwise OR register A with itself - Only updates flags)
                 self.a |= self.a;
                 self.set_flags(self.a == 0, false, false, false);
                 4
@@ -2004,7 +1948,7 @@ impl Cpu {
                 16
             }
             0xD7 => {
-                // RST 10H (Denna har du redan, men bra att ha i blocket)
+                // RST 10H
                 let high = ((self.pc >> 8) & 0xFF) as u8;
                 let low = (self.pc & 0xFF) as u8;
                 self.sp = self.sp.wrapping_sub(1);
@@ -2375,15 +2319,14 @@ impl Cpu {
                 4
             }
 
-            // END OF OPCODES
             _ => {
                 println!(
-                    "\n[KRASCH] Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
+                    "\n[CRASH] Unknown or unimplemented opcode: 0x{:02X} at PC: 0x{:04X}",
                     opcode,
                     self.pc - 1
                 );
-                self.debug_dump(); // Dumpa registertillståndet direkt vid kraschen
-                0 // Returnera 0 för att tala om för main-loopen att stanna!
+                self.debug_dump();
+                0
             }
         }
     }
