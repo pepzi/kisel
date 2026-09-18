@@ -374,7 +374,7 @@ impl Cpu {
             }
             0x58 => {
                 // CLI
-                self.p &= !FLAG_C;
+                self.p &= !FLAG_I;
                 2
             }
             0xB8 => {
@@ -543,7 +543,6 @@ impl Cpu {
             0x9A => {
                 // TXS
                 self.sp = self.x;
-                self.set_zn(self.sp);
                 2
             }
 
@@ -1142,6 +1141,70 @@ impl Cpu {
                 let hi = self.pop(bus);
                 self.pc = u16::from_le_bytes([lo, hi]);
                 7
+            }
+
+            0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xFA => 2,
+
+            0x80 | 0x82 | 0x89 | 0xC2 | 0xE2 => {
+                let _ = self.fetch(bus); // unofficial NOP #imm
+                2
+            }
+
+            0x0B | 0x2B => {
+                // ANC #imm
+                self.a &= self.fetch(bus);
+                self.set_zn(self.a);
+                self.p &= !FLAG_C;
+                if self.a & 0x80 != 0 {
+                    self.p |= FLAG_C;
+                }
+                2
+            }
+
+            0x4B => {
+                // ALR #imm
+                self.a &= self.fetch(bus);
+                self.a = self.lsr_val(self.a);
+                2
+            }
+
+            0x6B => {
+                // ARR #imm
+                self.a &= self.fetch(bus);
+                let old_c = self.p & FLAG_C != 0;
+                self.a = (self.a >> 1) | if old_c { 0x80 } else { 0 };
+                self.p &= !(FLAG_C | FLAG_V);
+                if self.a & 0x40 != 0 {
+                    self.p |= FLAG_C;
+                }
+                if ((self.a >> 6) ^ (self.a >> 5)) & 1 != 0 {
+                    self.p |= FLAG_V;
+                }
+                self.set_zn(self.a);
+                2
+            }
+
+            0xAB => {
+                // LAX #imm (test-ROM-stabil variant)
+                self.a = self.fetch(bus);
+                self.x = self.a;
+                self.set_zn(self.a);
+                2
+            }
+
+            0xCB => {
+                // AXS #imm
+                let v = self.fetch(bus);
+                let t = self.a & self.x;
+                self.compare(t, v);
+                self.x = t.wrapping_sub(v);
+                2
+            }
+
+            0xEB => {
+                let v = self.fetch(bus);
+                self.sbc(v);
+                2
             }
 
             0xEA => {
