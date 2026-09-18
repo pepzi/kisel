@@ -1,4 +1,5 @@
 /target
+/roms
 *.gb
 *.zip
 *.log

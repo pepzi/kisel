@@ -1,5 +1,5 @@
 mod gb;
-// mod nes;
+mod nes;
 
 use std::env;
 use std::path::Path;
@@ -25,10 +25,7 @@ fn main() {
 
     match ext.as_str() {
         "gb" | "gbc" => gb::run(rom),
-        "nes" => {
-            eprintln!("NES är inte inkopplad än: {rom}");
-            std::process::exit(1);
-        }
+        "nes" => nes::run(rom),
         _ => {
             eprintln!("Okänd ROM-typ ({ext}): {rom}");
             eprintln!("Använd: kisel <fil.gb|fil.nes>");
