@@ -13,7 +13,8 @@ const CYCLES_PER_FRAME: u32 = 29828;
 struct NesBus<'a> {
     ram: [u8; 0x0800],
     cart: &'a mut Cart,
-    frame: u32,
+    ppuctrl: u8,
+    ppustatus: u8,
 }
 
 impl Bus for NesBus<'_> {
@@ -21,11 +22,10 @@ impl Bus for NesBus<'_> {
         match addr {
             0x0000..=0x1FFF => self.ram[(addr as usize) & 0x07FF],
             0x2000..=0x3FFF => {
-                let reg = 0x2000 + (addr & 0x0007);
-                if reg == 0x2002 {
-                    // bit 7 = VBlank. Växla varje läsning så init-loopar släpper.
-                    self.frame = self.frame.wrapping_add(1);
-                    if self.frame & 1 != 0 { 0x80 } else { 0x00 }
+                if addr & 7 == 2 {
+                    let v = self.ppustatus;
+                    self.ppustatus &= !0xC0; // nollställ både VBlank och sprite 0
+                    v
                 } else {
                     0
                 }
@@ -39,8 +39,10 @@ impl Bus for NesBus<'_> {
     }
 
     fn write(&mut self, addr: u16, value: u8) {
-        if addr <= 0x1FFF {
-            self.ram[(addr as usize) & 0x07FF] = value;
+        match addr {
+            0x0000..=0x1FFF => self.ram[(addr as usize) & 0x07FF] = value,
+            0x2000..=0x3FFF if addr & 7 == 0 => self.ppuctrl = value,
+            _ => {}
         }
     }
 }
@@ -81,7 +83,8 @@ pub fn run(rom_path: &str) {
     let mut bus = NesBus {
         ram: [0; 0x0800],
         cart: &mut cart,
-        frame: 0,
+        ppuctrl: 0,
+        ppustatus: 0,
     };
 
     if nestest {
@@ -112,6 +115,26 @@ pub fn run(rom_path: &str) {
     }
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        if window.is_key_pressed(Key::P, minifb::KeyRepeat::No) {
+            println!(
+                "PC={:04X} A={:02X} X={:02X} Y={:02X} P={:02X} SP={:02X} PPUCTRL={:02X} PPUSTATUS={:02X} I={}",
+                cpu.pc,
+                cpu.a,
+                cpu.x,
+                cpu.y,
+                cpu.p,
+                cpu.sp,
+                bus.ppuctrl,
+                bus.ppustatus,
+                cpu.p & cpu::FLAG_I != 0
+            );
+            print!("@PC:");
+            for i in 0..8u16 {
+                print!(" {:02X}", bus.read(cpu.pc.wrapping_add(i)));
+            }
+            println!();
+        }
+
         let mut cycles = 0u32;
         while cycles < CYCLES_PER_FRAME {
             let n = cpu.step(&mut bus);
@@ -119,6 +142,19 @@ pub fn run(rom_path: &str) {
                 std::process::exit(1);
             }
             cycles += n;
+        }
+
+        bus.ppustatus |= 0xC0; // VBlank + sprite 0
+
+        if bus.ppuctrl & 0x80 != 0 {
+            let ret = cpu.pc;
+            cpu.push(&mut bus, (ret >> 8) as u8);
+            cpu.push(&mut bus, ret as u8);
+            cpu.push(&mut bus, (cpu.p | cpu::FLAG_U) & !cpu::FLAG_B);
+            cpu.p |= cpu::FLAG_I;
+            let lo = bus.read(0xFFFA);
+            let hi = bus.read(0xFFFB);
+            cpu.pc = u16::from_le_bytes([lo, hi]);
         }
 
         window
