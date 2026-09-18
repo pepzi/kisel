@@ -26,6 +26,7 @@ impl Bus for NesBus<'_> {
         match addr {
             0x0000..=0x1FFF => self.ram[(addr as usize) & 0x07FF],
             0x2000..=0x3FFF => self.ppu.read_reg(addr, self.cart),
+            0x6000..=0x7FFF => self.cart.wram_read(addr),
             0x4016 => {
                 let bit = if self.strobe {
                     self.buttons & 1
@@ -60,6 +61,7 @@ impl Bus for NesBus<'_> {
                     self.shift = self.buttons;
                 }
             }
+            0x6000..=0x7FFF => self.cart.wram_write(addr, value),
             0x8000..=0xFFFF => self.cart.mmc1_write(addr, value),
             _ => {}
         }
@@ -98,7 +100,7 @@ pub fn run(rom_path: &str) {
         cart.mapper,
         cart.prg_banks,
         cart.chr_banks,
-        if cart.vertical_mirror { "V" } else { "H" },
+        cart.mirror_name(),
         cart.has_trainer
     );
 

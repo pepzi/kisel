@@ -7,13 +7,18 @@ pub struct Cart {
     pub mapper: u16,
     pub prg_banks: u8,
     pub chr_banks: u8,
-    pub vertical_mirror: bool,
     pub has_trainer: bool,
+    /// 0: one-screen A, 1: one-screen B, 2: vertical, 3: horizontal
+    mirror: u8,
     prg_mode: u8,
     prg_bank: usize,
+    chr_bank0: u8,
+    chr_bank1: u8,
     shift: u8,
     shift_count: u8,
     control: u8,
+    prg_ram: [u8; 0x2000],
+    prg_ram_disable: bool,
 }
 
 impl Cart {
@@ -69,14 +74,86 @@ impl Cart {
             mapper,
             prg_banks,
             chr_banks,
-            vertical_mirror,
             has_trainer,
+            mirror: if vertical_mirror { 2 } else { 3 },
             prg_mode: 3,
             prg_bank: 0,
+            chr_bank0: 0,
+            chr_bank1: 0,
             shift: 0,
             shift_count: 0,
             control: 0x0C,
+            prg_ram: [0; 0x2000],
+            prg_ram_disable: false,
         })
+    }
+
+    pub fn mirror_name(&self) -> &'static str {
+        match self.mirror & 3 {
+            0 => "1A",
+            1 => "1B",
+            2 => "V",
+            _ => "H",
+        }
+    }
+
+    pub fn nt_bank(&self, nt_offset: u16) -> usize {
+        let n = (nt_offset / 0x400) & 3;
+        match self.mirror & 3 {
+            0 => 0,
+            1 => 1,
+            2 => (n & 1) as usize,
+            _ => ((n >> 1) & 1) as usize,
+        }
+    }
+
+    pub fn chr_read(&self, addr: u16) -> u8 {
+        let off = self.chr_map(addr);
+        self.chr.get(off).copied().unwrap_or(0)
+    }
+
+    pub fn chr_write(&mut self, addr: u16, value: u8) {
+        if self.chr_banks != 0 {
+            return;
+        }
+        let off = self.chr_map(addr);
+        if let Some(slot) = self.chr.get_mut(off) {
+            *slot = value;
+        }
+    }
+
+    pub fn wram_read(&self, addr: u16) -> u8 {
+        if self.mapper != 1 || self.prg_ram_disable {
+            return 0;
+        }
+        self.prg_ram[addr as usize & 0x1FFF]
+    }
+
+    pub fn wram_write(&mut self, addr: u16, value: u8) {
+        if self.mapper != 1 || self.prg_ram_disable {
+            return;
+        }
+        self.prg_ram[addr as usize & 0x1FFF] = value;
+    }
+
+    fn chr_map(&self, addr: u16) -> usize {
+        let addr = addr as usize & 0x1FFF;
+        let len = self.chr.len().max(1);
+        if self.mapper != 1 {
+            return addr % len;
+        }
+        let banks = (len / 0x1000).max(1);
+        let chr_4k = self.control & 0x10 != 0;
+        let bank = if chr_4k {
+            if addr < 0x1000 {
+                self.chr_bank0
+            } else {
+                self.chr_bank1
+            }
+        } else {
+            (self.chr_bank0 & !1) + u8::from(addr >= 0x1000)
+        };
+        (bank as usize % banks) * 0x1000 + (addr & 0x0FFF)
     }
 
     pub fn mmc1_write(&mut self, addr: u16, value: u8) {
@@ -103,11 +180,14 @@ impl Cart {
             0x8000..=0x9FFF => {
                 self.control = data;
                 self.prg_mode = (data >> 2) & 3;
-                self.vertical_mirror = data & 0x03 != 2;
+                self.mirror = data & 3;
             }
+            0xA000..=0xBFFF => self.chr_bank0 = data,
+            0xC000..=0xDFFF => self.chr_bank1 = data,
             0xE000..=0xFFFF => {
                 let banks = (self.prg.len() / 0x4000).max(1);
                 self.prg_bank = (data as usize & 0x0F) % banks;
+                self.prg_ram_disable = data & 0x10 != 0;
             }
             _ => {}
         }

@@ -327,7 +327,7 @@ impl Ppu {
         }
     }
 
-    fn map(&self, mut addr: u16, vertical: bool) -> (bool, usize) {
+    fn map(&self, mut addr: u16, cart: &Cart) -> (bool, usize) {
         addr &= 0x3FFF;
         if addr >= 0x3F00 {
             let mut p = (addr as usize - 0x3F00) & 0x1F;
@@ -337,25 +337,16 @@ impl Ppu {
             return (true, p);
         }
         let nt = (addr.saturating_sub(0x2000)) & 0x0FFF;
-        let table = if vertical {
-            (nt / 0x400) & 1
-        } else {
-            (nt / 0x800) & 1
-        };
-        (false, table as usize * 0x400 + (nt as usize & 0x3FF))
+        let table = cart.nt_bank(nt);
+        (false, table * 0x400 + (nt as usize & 0x3FF))
     }
 
     fn mem_read(&self, addr: u16, cart: &Cart) -> u8 {
         let addr = addr & 0x3FFF;
         if addr < 0x2000 {
-            let chr = &cart.chr;
-            if chr.is_empty() {
-                0
-            } else {
-                chr[addr as usize % chr.len()]
-            }
+            cart.chr_read(addr)
         } else {
-            let (pal, i) = self.map(addr, cart.vertical_mirror);
+            let (pal, i) = self.map(addr, cart);
             if pal { self.palette[i] } else { self.vram[i] }
         }
     }
@@ -363,15 +354,10 @@ impl Ppu {
     fn mem_write(&mut self, addr: u16, value: u8, cart: &mut Cart) {
         let addr = addr & 0x3FFF;
         if addr < 0x2000 {
-            if cart.chr_banks == 0 {
-                let len = cart.chr.len();
-                if len != 0 {
-                    cart.chr[addr as usize % len] = value;
-                }
-            }
+            cart.chr_write(addr, value);
             return;
         }
-        let (pal, i) = self.map(addr, cart.vertical_mirror);
+        let (pal, i) = self.map(addr, cart);
         if pal {
             self.palette[i] = value & 0x3F;
         } else {
