@@ -156,10 +156,18 @@ impl Cart {
         (bank as usize % banks) * 0x1000 + (addr & 0x0FFF)
     }
 
-    pub fn mmc1_write(&mut self, addr: u16, value: u8) {
-        if self.mapper != 1 {
-            return;
+    pub fn prg_write(&mut self, addr: u16, value: u8) {
+        match self.mapper {
+            1 => self.mmc1_write(addr, value),
+            2 => {
+                let banks = (self.prg.len() / 0x4000).max(1);
+                self.prg_bank = value as usize % banks;
+            }
+            _ => {}
         }
+    }
+
+    fn mmc1_write(&mut self, addr: u16, value: u8) {
         if value & 0x80 != 0 {
             self.shift = 0;
             self.shift_count = 0;
@@ -198,7 +206,13 @@ impl Cart {
         let last = banks - 1;
         let slot_low = matches!(addr, 0x8000..=0xBFFF);
 
-        let bank = if self.mapper != 1 {
+        let bank = if self.mapper == 2 {
+            if slot_low {
+                self.prg_bank
+            } else {
+                last
+            }
+        } else if self.mapper != 1 {
             if slot_low {
                 0
             } else if banks > 1 {

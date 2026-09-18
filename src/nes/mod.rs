@@ -62,7 +62,7 @@ impl Bus for NesBus<'_> {
                 }
             }
             0x6000..=0x7FFF => self.cart.wram_write(addr, value),
-            0x8000..=0xFFFF => self.cart.mmc1_write(addr, value),
+            0x8000..=0xFFFF => self.cart.prg_write(addr, value),
             _ => {}
         }
     }
@@ -104,7 +104,7 @@ pub fn run(rom_path: &str) {
         cart.has_trainer
     );
 
-    if cart.mapper != 0 && cart.mapper != 1 {
+    if !matches!(cart.mapper, 0 | 1 | 2) {
         eprintln!("NES: mapper {} is not implemented", cart.mapper);
         std::process::exit(1);
     }
