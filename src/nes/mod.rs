@@ -14,22 +14,87 @@ struct NesBus<'a> {
     ram: [u8; 0x0800],
     cart: &'a mut Cart,
     ppuctrl: u8,
+    ppumask: u8,
     ppustatus: u8,
+    vram: [u8; 0x800],
+    palette: [u8; 0x20],
+    v: u16,
+    w: bool,
+}
+
+impl NesBus<'_> {
+    fn ppu_map(&self, mut addr: u16) -> (bool, usize) {
+        addr &= 0x3FFF;
+        if addr >= 0x3F00 {
+            let mut p = (addr as usize - 0x3F00) & 0x1F;
+            if p & 0x13 == 0x10 {
+                p &= !0x10;
+            }
+            return (true, p);
+        }
+        let nt = (addr.saturating_sub(0x2000)) & 0x0FFF;
+        let table = if self.cart.vertical_mirror {
+            (nt / 0x400) & 1
+        } else {
+            (nt / 0x800) & 1
+        };
+        let off = table as usize * 0x400 + (nt as usize & 0x3FF);
+        (false, off)
+    }
+
+    fn ppu_read(&self, addr: u16) -> u8 {
+        let addr = addr & 0x3FFF;
+        if addr < 0x2000 {
+            let chr = &self.cart.chr;
+            if chr.is_empty() {
+                0
+            } else {
+                chr[addr as usize % chr.len()]
+            }
+        } else {
+            let (pal, i) = self.ppu_map(addr);
+            if pal { self.palette[i] } else { self.vram[i] }
+        }
+    }
+
+    fn ppu_write(&mut self, addr: u16, value: u8) {
+        let addr = addr & 0x3FFF;
+        if addr < 0x2000 {
+            let len = self.cart.chr.len();
+            if len != 0 {
+                self.cart.chr[addr as usize % len] = value;
+            }
+            return;
+        }
+        let (pal, i) = self.ppu_map(addr);
+        if pal {
+            self.palette[i] = value;
+        } else {
+            self.vram[i] = value;
+        }
+    }
 }
 
 impl Bus for NesBus<'_> {
     fn read(&mut self, addr: u16) -> u8 {
         match addr {
             0x0000..=0x1FFF => self.ram[(addr as usize) & 0x07FF],
-            0x2000..=0x3FFF => {
-                if addr & 7 == 2 {
+            0x2000..=0x3FFF => match addr & 7 {
+                2 => {
                     let v = self.ppustatus;
-                    self.ppustatus &= !0xC0; // nollställ både VBlank och sprite 0
+                    self.ppustatus &= !0xC0;
+                    self.w = false;
                     v
-                } else {
-                    0
                 }
-            }
+                7 => {
+                    let v = self.ppu_read(self.v);
+                    self.v = self
+                        .v
+                        .wrapping_add(if self.ppuctrl & 0x04 != 0 { 32 } else { 1 });
+                    v
+                }
+                _ => 0,
+            },
             0x8000..=0xFFFF => {
                 let off = (addr as usize - 0x8000) % self.cart.prg.len();
                 self.cart.prg[off]
@@ -41,8 +106,56 @@ impl Bus for NesBus<'_> {
     fn write(&mut self, addr: u16, value: u8) {
         match addr {
             0x0000..=0x1FFF => self.ram[(addr as usize) & 0x07FF] = value,
-            0x2000..=0x3FFF if addr & 7 == 0 => self.ppuctrl = value,
+            0x2000..=0x3FFF => match addr & 7 {
+                0 => self.ppuctrl = value,
+                1 => self.ppumask = value,
+                5 => self.w = !self.w,
+                6 => {
+                    if !self.w {
+                        self.v = (self.v & 0x00FF) | ((value as u16 & 0x3F) << 8);
+                    } else {
+                        self.v = (self.v & 0xFF00) | value as u16;
+                    }
+                    self.w = !self.w;
+                }
+                7 => {
+                    self.ppu_write(self.v, value);
+                    self.v = self
+                        .v
+                        .wrapping_add(if self.ppuctrl & 0x04 != 0 { 32 } else { 1 });
+                }
+                _ => {}
+            },
             _ => {}
+        }
+    }
+}
+
+fn draw_bg(bus: &NesBus, buffer: &mut [u32]) {
+    let nt = 0x2000 | ((bus.ppuctrl as u16 & 0x03) * 0x400);
+    let pat = if bus.ppuctrl & 0x10 != 0 {
+        0x1000u16
+    } else {
+        0
+    };
+    let colors = [0xFF000000, 0xFF555555, 0xFFAAAAAA, 0xFFFFFFFF];
+
+    for ty in 0..30u16 {
+        for tx in 0..32u16 {
+            let tile = bus.ppu_read(nt + ty * 32 + tx) as u16;
+            for row in 0..8u16 {
+                let p0 = bus.ppu_read(pat + tile * 16 + row);
+                let p1 = bus.ppu_read(pat + tile * 16 + row + 8);
+                for col in 0..8u16 {
+                    let bit = 7 - col;
+                    let cid = (((p1 >> bit) & 1) << 1) | ((p0 >> bit) & 1);
+                    let px = (tx * 8 + col) as usize;
+                    let py = (ty * 8 + row) as usize;
+                    if py < 240 {
+                        buffer[py * 256 + px] = colors[cid as usize];
+                    }
+                }
+            }
         }
     }
 }
@@ -84,7 +197,12 @@ pub fn run(rom_path: &str) {
         ram: [0; 0x0800],
         cart: &mut cart,
         ppuctrl: 0,
+        ppumask: 0,
         ppustatus: 0,
+        vram: [0; 0x800],
+        palette: [0; 0x20],
+        v: 0,
+        w: false,
     };
 
     if nestest {
@@ -156,7 +274,7 @@ pub fn run(rom_path: &str) {
             let hi = bus.read(0xFFFB);
             cpu.pc = u16::from_le_bytes([lo, hi]);
         }
-
+        draw_bg(&bus, &mut buffer);
         window
             .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
             .unwrap();
