@@ -104,7 +104,7 @@ pub fn run(rom_path: &str) {
         cart.has_trainer
     );
 
-    if !matches!(cart.mapper, 0 | 1 | 2) {
+    if !matches!(cart.mapper, 0 | 1 | 2 | 3) {
         eprintln!("NES: mapper {} is not implemented", cart.mapper);
         std::process::exit(1);
     }
