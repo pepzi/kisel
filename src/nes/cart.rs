@@ -139,21 +139,27 @@ impl Cart {
     fn chr_map(&self, addr: u16) -> usize {
         let addr = addr as usize & 0x1FFF;
         let len = self.chr.len().max(1);
-        if self.mapper != 1 {
-            return addr % len;
-        }
-        let banks = (len / 0x1000).max(1);
-        let chr_4k = self.control & 0x10 != 0;
-        let bank = if chr_4k {
-            if addr < 0x1000 {
-                self.chr_bank0
-            } else {
-                self.chr_bank1
+        match self.mapper {
+            1 => {
+                let banks = (len / 0x1000).max(1);
+                let chr_4k = self.control & 0x10 != 0;
+                let bank = if chr_4k {
+                    if addr < 0x1000 {
+                        self.chr_bank0
+                    } else {
+                        self.chr_bank1
+                    }
+                } else {
+                    (self.chr_bank0 & !1) + u8::from(addr >= 0x1000)
+                };
+                (bank as usize % banks) * 0x1000 + (addr & 0x0FFF)
             }
-        } else {
-            (self.chr_bank0 & !1) + u8::from(addr >= 0x1000)
-        };
-        (bank as usize % banks) * 0x1000 + (addr & 0x0FFF)
+            3 => {
+                let banks = (len / 0x2000).max(1);
+                (self.chr_bank0 as usize % banks) * 0x2000 + addr
+            }
+            _ => addr % len,
+        }
     }
 
     pub fn prg_write(&mut self, addr: u16, value: u8) {
@@ -162,6 +168,10 @@ impl Cart {
             2 => {
                 let banks = (self.prg.len() / 0x4000).max(1);
                 self.prg_bank = value as usize % banks;
+            }
+            3 => {
+                let banks = (self.chr.len() / 0x2000).max(1);
+                self.chr_bank0 = (value as usize % banks) as u8;
             }
             _ => {}
         }
