@@ -1,6 +1,21 @@
 use std::fs;
 use std::io::{self, ErrorKind};
 
+#[derive(Clone, Copy, Debug)]
+pub struct CartState {
+    mirror: u8,
+    prg_mode: u8,
+    prg_bank: usize,
+    chr_bank0: u8,
+    chr_bank1: u8,
+    shift: u8,
+    shift_count: u8,
+    control: u8,
+    prg_ram: [u8; 0x2000],
+    prg_ram_disable: bool,
+}
+
+#[derive(Clone)]
 pub struct Cart {
     pub prg: Vec<u8>,
     pub chr: Vec<u8>,
@@ -22,6 +37,33 @@ pub struct Cart {
 }
 
 impl Cart {
+    pub fn capture_state(&self) -> CartState {
+        CartState {
+            mirror: self.mirror,
+            prg_mode: self.prg_mode,
+            prg_bank: self.prg_bank,
+            chr_bank0: self.chr_bank0,
+            chr_bank1: self.chr_bank1,
+            shift: self.shift,
+            shift_count: self.shift_count,
+            control: self.control,
+            prg_ram: self.prg_ram,
+            prg_ram_disable: self.prg_ram_disable,
+        }
+    }
+    pub fn load_state(&mut self, state: &CartState) {
+        self.mirror = state.mirror;
+        self.prg_mode = state.prg_mode;
+        self.prg_bank = state.prg_bank;
+        self.chr_bank0 = state.chr_bank0;
+        self.chr_bank1 = state.chr_bank1;
+        self.shift = state.shift;
+        self.shift_count = state.shift_count;
+        self.control = state.control;
+        self.prg_ram = state.prg_ram;
+        self.prg_ram_disable = state.prg_ram_disable;
+    }
+
     pub fn load(path: &str) -> io::Result<Self> {
         let data = fs::read(path)?;
         if data.len() < 16 || &data[0..4] != b"NES\x1A" {
@@ -217,11 +259,7 @@ impl Cart {
         let slot_low = matches!(addr, 0x8000..=0xBFFF);
 
         let bank = if self.mapper == 2 {
-            if slot_low {
-                self.prg_bank
-            } else {
-                last
-            }
+            if slot_low { self.prg_bank } else { last }
         } else if self.mapper != 1 {
             if slot_low {
                 0

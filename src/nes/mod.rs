@@ -2,7 +2,7 @@ pub mod cart;
 pub mod cpu;
 pub mod ppu;
 
-use cart::Cart;
+use cart::{Cart, CartState};
 use cpu::{Bus, Cpu, FLAG_B, FLAG_I, FLAG_U};
 use minifb::{Key, Window, WindowOptions};
 use ppu::Ppu;
@@ -10,6 +10,60 @@ use std::path::Path;
 
 const SCREEN_WIDTH: usize = 256;
 const SCREEN_HEIGHT: usize = 240;
+
+use std::collections::VecDeque;
+
+// Denna struktur hanterar kön av states i minnet
+struct RewindManager {
+    snapshots: VecDeque<NesState>,
+    max_snapshots: usize,
+    frame_counter: usize,
+    interval: usize,
+}
+
+impl RewindManager {
+    fn new(seconds_to_record: usize, interval: usize) -> Self {
+        let max_snapshots = (seconds_to_record * 60) / interval;
+        Self {
+            snapshots: VecDeque::with_capacity(max_snapshots),
+            max_snapshots,
+            frame_counter: 0,
+            interval,
+        }
+    }
+
+    fn record(&mut self, state: NesState) {
+        self.frame_counter += 1;
+        if self.frame_counter % self.interval == 0 {
+            if self.snapshots.len() >= self.max_snapshots {
+                self.snapshots.pop_front(); // Släng det äldsta tillståndet
+            }
+            self.snapshots.push_back(state);
+        }
+    }
+
+    fn pop_prev(&mut self) -> Option<NesState> {
+        self.snapshots.pop_back()
+    }
+}
+
+#[derive(Clone)]
+pub struct NesState {
+    pub cpu_pc: u16,
+    pub cpu_a: u8,
+    pub cpu_x: u8,
+    pub cpu_y: u8,
+    pub cpu_s: u8,
+    pub cpu_status: u8,
+
+    pub ram: [u8; 0x0800],
+    pub buttons: u8,
+    pub strobe: bool,
+    pub shift: u8,
+    pub dma_stall: u32,
+    pub ppu_state: Ppu,
+    pub cart_state: CartState,
+}
 
 struct NesBus<'a> {
     ram: [u8; 0x0800],
@@ -19,6 +73,44 @@ struct NesBus<'a> {
     strobe: bool,
     shift: u8,
     dma_stall: u32,
+}
+
+impl<'a> NesBus<'a> {
+    pub fn capture_state(&self, cpu: &Cpu) -> NesState {
+        NesState {
+            cpu_pc: cpu.pc,
+            cpu_a: cpu.a,
+            cpu_x: cpu.x,
+            cpu_y: cpu.y,
+            cpu_s: cpu.sp,
+            cpu_status: cpu.p, // eller vad ditt statusregister heter
+
+            ram: self.ram,
+            buttons: self.buttons,
+            strobe: self.strobe,
+            shift: self.shift,
+            dma_stall: self.dma_stall,
+            ppu_state: self.ppu.clone(),
+            cart_state: self.cart.capture_state(),
+        }
+    }
+
+    pub fn load_state(&mut self, cpu: &mut Cpu, state: &NesState) {
+        cpu.pc = state.cpu_pc;
+        cpu.a = state.cpu_a;
+        cpu.x = state.cpu_x;
+        cpu.y = state.cpu_y;
+        cpu.sp = state.cpu_s;
+        cpu.p = state.cpu_status;
+
+        self.ram = state.ram;
+        self.buttons = state.buttons;
+        self.strobe = state.strobe;
+        self.shift = state.shift;
+        self.dma_stall = state.dma_stall;
+        self.ppu = state.ppu_state.clone();
+        self.cart.load_state(&state.cart_state);
+    }
 }
 
 impl Bus for NesBus<'_> {
@@ -104,7 +196,7 @@ pub fn run(rom_path: &str) {
         cart.has_trainer
     );
 
-    if !matches!(cart.mapper, 0 | 1 | 2 | 3) {
+    if !matches!(cart.mapper, 0..=3) {
         eprintln!("NES: mapper {} is not implemented", cart.mapper);
         std::process::exit(1);
     }
@@ -145,6 +237,8 @@ pub fn run(rom_path: &str) {
     )
     .unwrap_or_else(|e| panic!("{e}"));
     window.set_target_fps(60);
+    let mut quick_save_state: Option<NesState> = None;
+    let mut rewind_manager = RewindManager::new(300, 1); // One frame per second for 5 minutes stored
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let mut buttons = 0u8;
@@ -174,6 +268,28 @@ pub fn run(rom_path: &str) {
         }
         bus.buttons = buttons;
 
+        if window.is_key_down(minifb::Key::F5) {
+            // VIKTIGT: Om din CPU (pc, a, x, y, status) lever utanför din NesBus,
+            // se till att du har uppdaterat capture_state så att den även tar emot och
+            // sparar din cpu! Exempel: quick_save_state =
+            // Some(nes_bus.capture_state(&cpu));
+
+            quick_save_state = Some(bus.capture_state(&cpu));
+            println!("Save state sparad i minnet!");
+        }
+
+        if window.is_key_down(minifb::Key::F6) {
+            if let Some(ref state) = quick_save_state {
+                // VIKTIGT: Om du sparar CPU-register i din NesState, se till att skicka med din
+                // cpu här med! Exempel: nes_bus.load_state(&mut cpu, state);
+
+                bus.load_state(&mut cpu, state);
+                println!("Save state laddad framgångsrikt!");
+            } else {
+                println!("Det finns ingen sparfil att ladda ännu! Tryck på F5 först.");
+            }
+        }
+
         if window.is_key_pressed(Key::P, minifb::KeyRepeat::No) {
             println!(
                 "PC={:04X} A={:02X} X={:02X} Y={:02X} P={:02X} SP={:02X} LY={}",
@@ -189,39 +305,83 @@ pub fn run(rom_path: &str) {
             );
         }
 
-        for ly in 0..262u16 {
-            bus.ppu.ly = ly;
+        if window.is_key_down(minifb::Key::R) {
+            if let Some(prev_state) = rewind_manager.pop_prev() {
+                bus.load_state(&mut cpu, &prev_state);
+                for ly in 0..262u16 {
+                    bus.ppu.ly = ly;
 
-            if ly == 241 {
-                bus.ppu.enter_vblank();
-                if bus.ppu.nmi_enabled() {
-                    let ret = cpu.pc;
-                    cpu.push(&mut bus, (ret >> 8) as u8);
-                    cpu.push(&mut bus, ret as u8);
-                    cpu.push(&mut bus, (cpu.p | FLAG_U) & !FLAG_B);
-                    cpu.p |= FLAG_I;
-                    let lo = bus.read(0xFFFA);
-                    let hi = bus.read(0xFFFB);
-                    cpu.pc = u16::from_le_bytes([lo, hi]);
+                    if ly == 241 {
+                        bus.ppu.enter_vblank();
+                        if bus.ppu.nmi_enabled() {
+                            let ret = cpu.pc;
+                            cpu.push(&mut bus, (ret >> 8) as u8);
+                            cpu.push(&mut bus, ret as u8);
+                            cpu.push(&mut bus, (cpu.p | FLAG_U) & !FLAG_B);
+                            cpu.p |= FLAG_I;
+                            let lo = bus.read(0xFFFA);
+                            let hi = bus.read(0xFFFB);
+                            cpu.pc = u16::from_le_bytes([lo, hi]);
+                        }
+                    }
+
+                    if ly >= 241 {
+                        run_cpu(&mut cpu, &mut bus, 113);
+                        if ly == 261 {
+                            bus.ppu.pre_render();
+                        }
+                        continue;
+                    }
+
+                    if ly < 240 {
+                        bus.ppu.begin_visible_line(bus.cart);
+                        bus.ppu.draw_scanline(bus.cart, &mut buffer);
+                        bus.ppu.draw_sprites(bus.cart, &mut buffer);
+                        bus.ppu.end_visible_line();
+                    }
+
+                    run_cpu(&mut cpu, &mut bus, 113);
                 }
+                window
+                    .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
+                    .unwrap();
             }
+        } else {
+            for ly in 0..262u16 {
+                bus.ppu.ly = ly;
 
-            if ly >= 241 {
+                if ly == 241 {
+                    bus.ppu.enter_vblank();
+                    if bus.ppu.nmi_enabled() {
+                        let ret = cpu.pc;
+                        cpu.push(&mut bus, (ret >> 8) as u8);
+                        cpu.push(&mut bus, ret as u8);
+                        cpu.push(&mut bus, (cpu.p | FLAG_U) & !FLAG_B);
+                        cpu.p |= FLAG_I;
+                        let lo = bus.read(0xFFFA);
+                        let hi = bus.read(0xFFFB);
+                        cpu.pc = u16::from_le_bytes([lo, hi]);
+                    }
+                }
+
+                if ly >= 241 {
+                    run_cpu(&mut cpu, &mut bus, 113);
+                    if ly == 261 {
+                        bus.ppu.pre_render();
+                    }
+                    continue;
+                }
+
+                if ly < 240 {
+                    bus.ppu.begin_visible_line(bus.cart);
+                    bus.ppu.draw_scanline(bus.cart, &mut buffer);
+                    bus.ppu.draw_sprites(bus.cart, &mut buffer);
+                    bus.ppu.end_visible_line();
+                }
+
                 run_cpu(&mut cpu, &mut bus, 113);
-                if ly == 261 {
-                    bus.ppu.pre_render();
-                }
-                continue;
             }
-
-            if ly < 240 {
-                bus.ppu.begin_visible_line(bus.cart);
-                bus.ppu.draw_scanline(bus.cart, &mut buffer);
-                bus.ppu.draw_sprites(bus.cart, &mut buffer);
-                bus.ppu.end_visible_line();
-            }
-
-            run_cpu(&mut cpu, &mut bus, 113);
+            rewind_manager.record(bus.capture_state(&cpu));
         }
 
         window

@@ -12,6 +12,7 @@ const NES_PALETTE: [u32; 64] = [
     0xFFCCD278, 0xFFB4DE78, 0xFFA8E290, 0xFF98E2B4, 0xFFA0D6E0, 0xFFA0A2A0, 0xFF000000, 0xFF000000,
 ];
 
+#[derive(Clone)]
 pub struct Ppu {
     pub ctrl: u8,
     pub mask: u8,
