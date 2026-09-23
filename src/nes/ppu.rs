@@ -174,7 +174,7 @@ impl Ppu {
         let clip = self.mask & 0x06 != 0x06;
         for col in 0..8i32 {
             let px = sx + col;
-            if px < 0 || px >= 255 {
+            if !(0..255).contains(&px) {
                 continue;
             }
             if clip && px < 8 {
@@ -263,8 +263,8 @@ impl Ppu {
                 let cid = (((p1 >> bit) & 1) << 1) | ((p0 >> bit) & 1);
                 if self.mask & 0x02 != 0 || out >= 8 {
                     let idx = if cid == 0 { 0 } else { (pal << 2) | cid };
-                    buffer[row + out as usize] = self.rgb(idx as u8);
-                    self.bg_cid[out as usize] = cid as u8;
+                    buffer[row + out as usize] = self.rgb(idx);
+                    self.bg_cid[out as usize] = cid;
                 }
                 out += 1;
             }
