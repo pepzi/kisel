@@ -34,7 +34,7 @@ impl RewindManager {
 
     fn record(&mut self, state: NesState) {
         self.frame_counter += 1;
-        if self.frame_counter % self.interval == 0 {
+        if self.frame_counter.is_multiple_of(self.interval) {
             if self.snapshots.len() >= self.max_snapshots {
                 self.snapshots.pop_front(); // Släng det äldsta tillståndet
             }
@@ -44,6 +44,11 @@ impl RewindManager {
 
     fn pop_prev(&mut self) -> Option<NesState> {
         self.snapshots.pop_back()
+    }
+
+    pub fn clear(&mut self) {
+        self.snapshots.clear();
+        self.frame_counter = 0;
     }
 }
 
@@ -269,25 +274,14 @@ pub fn run(rom_path: &str) {
         bus.buttons = buttons;
 
         if window.is_key_down(minifb::Key::F5) {
-            // VIKTIGT: Om din CPU (pc, a, x, y, status) lever utanför din NesBus,
-            // se till att du har uppdaterat capture_state så att den även tar emot och
-            // sparar din cpu! Exempel: quick_save_state =
-            // Some(nes_bus.capture_state(&cpu));
-
             quick_save_state = Some(bus.capture_state(&cpu));
-            println!("Save state sparad i minnet!");
         }
 
-        if window.is_key_down(minifb::Key::F6) {
-            if let Some(ref state) = quick_save_state {
-                // VIKTIGT: Om du sparar CPU-register i din NesState, se till att skicka med din
-                // cpu här med! Exempel: nes_bus.load_state(&mut cpu, state);
-
-                bus.load_state(&mut cpu, state);
-                println!("Save state laddad framgångsrikt!");
-            } else {
-                println!("Det finns ingen sparfil att ladda ännu! Tryck på F5 först.");
-            }
+        if window.is_key_down(minifb::Key::F6)
+            && let Some(ref state) = quick_save_state
+        {
+            bus.load_state(&mut cpu, state);
+            rewind_manager.clear();
         }
 
         if window.is_key_pressed(Key::P, minifb::KeyRepeat::No) {
