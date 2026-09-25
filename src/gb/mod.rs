@@ -1,93 +1,89 @@
 pub mod cpu;
 pub mod mmu;
 
+use crate::gui::{Gui, Pad};
 use cpu::Cpu;
-use minifb::{Key, Window, WindowOptions};
 use mmu::Mmu;
 
-const SCREEN_WIDTH: usize = 160;
-const SCREEN_HEIGHT: usize = 144;
+pub const WIDTH: usize = 160;
+pub const HEIGHT: usize = 144;
 
-pub fn run(rom_path: &str) {
-    let mut mmu = Mmu::new();
-    let mut cpu = Cpu::new();
+pub struct Emu {
+    mmu: Mmu,
+    cpu: Cpu,
+    buffer: Vec<u32>,
+}
 
-    mmu.load_rom(rom_path);
-    mmu.init_after_boot();
-    println!("GB: {rom_path}");
+impl Emu {
+    pub fn load(rom_path: &str) -> Self {
+        let mut mmu = Mmu::new();
+        let cpu = Cpu::new();
+        mmu.load_rom(rom_path);
+        mmu.init_after_boot();
+        println!("GB: {rom_path}");
+        Self {
+            mmu,
+            cpu,
+            buffer: vec![0; WIDTH * HEIGHT],
+        }
+    }
 
-    let mut buffer: Vec<u32> = vec![0; SCREEN_WIDTH * SCREEN_HEIGHT];
-    let mut window = Window::new(
-        "kisel — Game Boy",
-        SCREEN_WIDTH,
-        SCREEN_HEIGHT,
-        WindowOptions {
-            scale: minifb::Scale::X4,
-            ..WindowOptions::default()
-        },
-    )
-    .unwrap_or_else(|e| panic!("{}", e));
-    window.set_target_fps(60);
+    pub fn pixels(&self) -> &[u32] {
+        &self.buffer
+    }
 
-    while window.is_open() && !window.is_key_down(Key::Escape) {
+    pub fn frame(&mut self, pad: Pad) {
         let mut buttons = 0x0Fu8;
         let mut dpad = 0x0Fu8;
-        if window.is_key_down(Key::Enter) {
+        if pad.start {
             buttons &= !0x08;
         }
-        if window.is_key_down(Key::Tab) {
+        if pad.select {
             buttons &= !0x04;
         }
-        if window.is_key_down(Key::Z) {
+        if pad.b {
             buttons &= !0x02;
         }
-        if window.is_key_down(Key::X) {
+        if pad.a {
             buttons &= !0x01;
         }
-        if window.is_key_down(Key::S) | window.is_key_down(Key::Down) {
+        if pad.down {
             dpad &= !0x08;
         }
-        if window.is_key_down(Key::W) | window.is_key_down(Key::Up) {
+        if pad.up {
             dpad &= !0x04;
         }
-        if window.is_key_down(Key::A) | window.is_key_down(Key::Left) {
+        if pad.left {
             dpad &= !0x02;
         }
-        if window.is_key_down(Key::D) | window.is_key_down(Key::Right) {
+        if pad.right {
             dpad &= !0x01;
         }
-        mmu.set_joypad(buttons, dpad);
+        self.mmu.set_joypad(buttons, dpad);
 
         let mut frame_cycles = 0;
         while frame_cycles < 70224 {
-            let cycles = cpu.step(&mut mmu);
+            let cycles = self.cpu.step(&mut self.mmu);
             if cycles == 0 {
                 println!("\n[STOPP] unimplemented GameBoy opcode.");
                 std::process::exit(1);
             }
-            mmu.tick(cycles);
-            mmu.ppu_step(cycles);
+            self.mmu.tick(cycles);
+            self.mmu.ppu_step(cycles);
             frame_cycles += cycles;
         }
 
-        let lcdc = mmu.read_byte(0xFF40);
+        let lcdc = self.mmu.read_byte(0xFF40);
         let colors = [0xFFFFFFFF, 0xFFB5B5B5, 0xFF6B6B6B, 0xFF000000];
-
         if lcdc & 0x80 == 0 {
-            for pixel in buffer.iter_mut() {
-                *pixel = 0xFF8BAC0F;
-            }
+            self.buffer.fill(0xFF8BAC0F);
         } else {
-            draw_layer(&mmu, &mut buffer, &colors, false);
+            draw_layer(&self.mmu, &mut self.buffer, &colors, false);
             if lcdc & 0x20 != 0 {
-                draw_layer(&mmu, &mut buffer, &colors, true);
+                draw_layer(&self.mmu, &mut self.buffer, &colors, true);
             }
-            draw_sprites(&mmu, &mut buffer, &colors, lcdc);
+            draw_sprites(&self.mmu, &mut self.buffer, &colors, lcdc);
         }
-
-        window
-            .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
-            .unwrap();
     }
 }
 
@@ -116,8 +112,8 @@ fn draw_layer(mmu: &Mmu, buffer: &mut [u32], colors: &[u32; 4], window: bool) {
         )
     };
 
-    for y in 0..SCREEN_HEIGHT as i32 {
-        for x in 0..SCREEN_WIDTH as i32 {
+    for y in 0..HEIGHT as i32 {
+        for x in 0..WIDTH as i32 {
             let (lx, ly) = if window {
                 (x - ox, y - oy)
             } else {
@@ -137,7 +133,7 @@ fn draw_layer(mmu: &Mmu, buffer: &mut [u32], colors: &[u32; 4], window: bool) {
             let b2 = mmu.read_byte(addr + 1);
             let bit = 7 - (px % 8);
             let cid = (((b2 >> bit) & 1) << 1) | ((b1 >> bit) & 1);
-            buffer[y as usize * SCREEN_WIDTH + x as usize] = colors[cid as usize];
+            buffer[y as usize * WIDTH + x as usize] = colors[cid as usize];
         }
     }
 }
@@ -173,34 +169,21 @@ fn draw_sprites(mmu: &Mmu, buffer: &mut [u32], colors: &[u32; 4], lcdc: u8) {
                 let px = sx + col;
                 let py = sy + row;
                 if (0..160).contains(&px) && (0..144).contains(&py) {
-                    buffer[py as usize * SCREEN_WIDTH + px as usize] = colors[cid as usize];
+                    buffer[py as usize * WIDTH + px as usize] = colors[cid as usize];
                 }
             }
         }
     }
 }
 
-pub fn run_graphic_noise() {
-    let mut buffer: Vec<u32> = vec![0; SCREEN_WIDTH * SCREEN_HEIGHT];
-    let mut window = Window::new(
-        "kisel — noise",
-        SCREEN_WIDTH,
-        SCREEN_HEIGHT,
-        WindowOptions {
-            scale: minifb::Scale::X4,
-            ..WindowOptions::default()
-        },
-    )
-    .unwrap_or_else(|e| panic!("{}", e));
-    window.set_target_fps(60);
-    while window.is_open() && !window.is_key_down(Key::Escape) {
+pub fn run_noise(gui: &mut Gui) {
+    let mut buffer = vec![0u32; WIDTH * HEIGHT];
+    while gui.running() {
         for pixel in buffer.iter_mut() {
-            let rand_val = rand_brightness();
-            *pixel = (255 << 24) | (rand_val << 16) | (rand_val << 8) | rand_val;
+            let v = rand_brightness();
+            *pixel = (255 << 24) | (v << 16) | (v << 8) | v;
         }
-        window
-            .update_with_buffer(&buffer, SCREEN_WIDTH, SCREEN_HEIGHT)
-            .unwrap();
+        gui.present(&buffer);
     }
 }
 

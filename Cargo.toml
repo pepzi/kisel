@@ -12,3 +12,4 @@ categories = ["emulators"]
 
 [dependencies]
 minifb = "0.28"
+rfd = "0.17"
