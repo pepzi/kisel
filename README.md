@@ -15,7 +15,7 @@ Current targets:
 | System | Status |
 |--------|--------|
 | Game Boy (DMG) | Playable for a few ROMs (Tetris, Super Mario Land, Alleyway with caveats) |
-| NES | Not wired up yet |
+| NES | SMB1 is playable without sound |
 | Commodore 64 | Planned |
 
 The Game Boy CPU passes [Blargg `cpu_instrs`](https://github.com/retrio/gb-test-roms). The PPU is scanline-based with per-line scroll (enough for Mario Land’s status bar). There is no sound.
